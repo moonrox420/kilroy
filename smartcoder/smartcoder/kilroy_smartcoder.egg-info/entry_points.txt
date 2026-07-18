@@ -1,0 +1,3 @@
+[console_scripts]
+smartcoder = smartcoder.cli.parser:main
+smartcoder-build-index = kilroy_retrieval:main

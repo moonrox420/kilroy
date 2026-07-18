@@ -1,0 +1,12 @@
+[package]
+name = "smartcoder_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "smartcoder_core"
+crate-type = ["rlib"]
+
+[dependencies]
+regex = "1.10"
+serde = { version = "1", features = ["derive"] }

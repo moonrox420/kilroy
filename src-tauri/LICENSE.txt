@@ -1,0 +1,39 @@
+Kilroy — End-User License Agreement
+====================================
+
+Kilroy is a local AI engineering platform. All processing happens on your
+machine. Kilroy does not transmit your code, commands, or chat history
+to any remote service.
+
+THIRD-PARTY COMPONENTS
+
+This installer bundles a copy of Ollama (ollama.com) as a runtime
+dependency. Ollama is distributed under the MIT License. The unmodified
+Ollama binary and its license file are included under
+%LOCALAPPDATA%\Programs\Kilroy\resources\ollama\.
+
+Models pulled via Ollama (Qwen, Llama, Mistral, etc.) are governed by
+their respective upstream licenses. Review each model's terms before
+commercial deployment.
+
+USAGE
+
+By installing Kilroy you acknowledge that:
+
+  - Kilroy executes code, applies file edits, and runs shell commands
+    based on the local LLM's output. Every such action is gated behind
+    an explicit Accept click in the chat UI, and shell commands default
+    to running inside Windows Sandbox (a disposable Hyper-V VM). You
+    nonetheless agree to review proposed actions before accepting them.
+
+  - The software is provided "AS IS", without warranty of any kind. The
+    authors are not liable for damages arising from Kilroy's use, even
+    when caused by accepted agent actions.
+
+  - You will not redistribute the Kilroy binary or its bundled
+    components without permission.
+
+For source code, support, or commercial licensing inquiries, contact
+support@kilroy.example.
+
+(c) The Kilroy authors. All rights reserved.

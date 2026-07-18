@@ -1,0 +1,14 @@
+datasets==4.3.0
+httpx==0.28.1
+huggingface_hub==1.22.0
+langchain_community==0.4.2
+langchain_core==1.4.9
+langchain_huggingface==1.2.2
+langchain_ollama==1.1.0
+langchain_text_splitters==1.1.2
+packaging==26.2
+pydantic==2.13.4
+pytest==9.1.1
+setuptools==83.0.0
+smolagents==1.26.0
+torch==2.10.0

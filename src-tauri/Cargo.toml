@@ -1,0 +1,79 @@
+[package]
+name = "kilroy"
+version = "0.1.0"
+description = "Kilroy — Local AI Agentic Software Engineering Platform"
+authors = ["Kilroy"]
+edition = "2021"
+
+[lib]
+name = "kilroy_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# NOTE: a `[build] rustflags = "-Zthreads=8"` table used to live here. That
+# was doubly wrong: `[build]` is a `.cargo/config.toml` section (cargo ignores
+# it inside Cargo.toml with an "unused manifest key" warning), and `-Zthreads`
+# is a nightly-only flag that breaks the stable toolchain this project builds
+# with. If parallel-frontend experiments are ever wanted again, put the flag
+# in `.cargo/config.toml` under a nightly toolchain — not here.
+
+# Dependency policy (deliberate, changed from the old fully-unpinned '*'
+# scheme): every dependency is pinned to the version Cargo.lock had already
+# resolved — the known-good set this app was built and tested against. Cargo
+# treats a bare version as a compatible range (e.g. "1.0.228" = >=1.0.228,
+# <2.0.0), so patch/minor updates still flow via `cargo update`, while a
+# fresh checkout without the lockfile can no longer silently jump to a
+# different major and break the build.
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.2", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-window-state = "2.4.1"
+# Process (relaunch after install). Pinned to the versions Cargo
+# resolved (now recorded in Cargo.lock), matching the pin-to-lockfile policy
+# used for the deps above. Note: tauri-plugin-updater was intentionally
+# removed — update checks require Ed25519 signing keys that live in .env,
+# which this project does not need for local-only development.
+tauri-plugin-process = "2.3.1"
+
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+
+parking_lot = "0.12.5"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+portable-pty = "0.9.0"
+uuid = { version = "1.23.3", features = ["v4", "serde"] }
+
+# Memory layer.
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+sqlite-vec = "0.1.9"
+sha2 = "0.11.0"
+
+# Ollama HTTP client. `rustls-tls` so we don't drag in OpenSSL on Windows.
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+
+anyhow = "1.0.102"
+
+# Diff machinery for the actuator.
+similar = "3.1.1"
+diffy = "0.5.0"
+regex = "1.11.1"
+smartcoder_core = { path = "../smartcoder_core" }
+
+[features]
+# Production-bundle gate that Tauri toggles itself.
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.debugging]
+inherits = "dev"
+debug = true

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Kilroy",
+  "version": "0.1.0",
+  "identifier": "com.kilroy.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Kilroy",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1080,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": true,
+        "backgroundColor": "#0b0d10",
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost ws: wss: http://localhost:* http://127.0.0.1:*"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/moonrox420/kilroy/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE5MjIyRTFCNUFDOUIyM0YKUldRL3NzbGFHeTRpcVRHc004czNRNHNDS2dyYlVodkVmMDZ5Vzl6QXhCU1NzaG1UYjFOSmZiTlIK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "publisher": "Kilroy",
+    "homepage": "https://github.com/moonrox420/kilroy",
+    "copyright": "© Kilroy",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "resources/ollama/**/*"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "category": "DeveloperTool",
+    "shortDescription": "Local AI Agentic Software Engineering Platform",
+    "longDescription": "Kilroy is a fully local, Windows 11-native AI software engineering system that combines an IDE, multi-agent orchestration, autonomous code generation, and sandboxed execution into a single desktop runtime."
+  }
+}

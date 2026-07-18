@@ -1,0 +1,93 @@
+# =============================================================================
+# SmartCoder — packaging metadata (PEP 621)
+# =============================================================================
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kilroy-smartcoder"
+version = "0.1.0"
+description = "A local, self-correcting coding agent (smolagents CodeAgent) grounded by Hugging Face dataset RAG."
+requires-python = ">=3.10"
+keywords = ["coding-agent", "smolagents", "rag", "ollama", "llm", "faiss", "huggingface", "code-generation"]
+authors = [{ name = "moonrox420" }]
+readme = "README.md"
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: OS Independent",
+]
+
+# Hard runtime dependencies
+dependencies = [
+    "smolagents",
+    "litellm",
+    "transformers",
+    "accelerate",
+    "datasets",
+    "huggingface-hub",
+    "safetensors",
+    "einops",
+    "sentence-transformers",
+    "faiss-cpu",
+    "numpy",
+    "langchain-core",
+    "langchain-community",
+    "langchain-huggingface",
+    "langchain-text-splitters",
+    "langchain-ollama",
+    "duckduckgo-search",
+    "python-dotenv",
+    "ollama",
+]
+
+[project.optional-dependencies]
+llama-cpp = ["llama-cpp-python"]
+docker = ["docker"]
+dev = ["pytest", "ruff", "build", "pytest-timeout"]
+all = ["llama-cpp-python", "docker"]
+
+# Entry points
+[project.scripts]
+smartcoder = "smartcoder.cli.parser:main"
+smartcoder-build-index = "kilroy_retrieval:main"
+
+[project.urls]
+Homepage = "https://github.com/moonrox420/kilroy"
+Repository = "https://github.com/moonrox420/kilroy"
+Issues = "https://github.com/moonrox420/kilroy/issues"
+
+# ====================== Setuptools Configuration ======================
+[tool.setuptools]
+packages = {find = {where = ["."], include = ["smartcoder*"]}}
+package-dir = {"smartcoder" = "smartcoder"}
+py-modules = ["kilroy_smartcoder", "kilroy_retrieval"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+smartcoder = ["*.txt", "*.md", "*.json", "py.typed"]
+
+# ====================== Tooling Config ======================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = ["-q", "--import-mode=importlib"]
+markers = [
+    "llm: tests that require live LLM calls",
+    "slow: slow or resource-heavy tests",
+]
+
+[tool.pyright]
+strict = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

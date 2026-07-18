@@ -1,0 +1,67 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editors / operating system
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+
+# Rust / Tauri / native Python extension output
+src-tauri/target/
+src-tauri/gen/
+src-tauri/WixTools/
+src-tauri/.cargo/
+smartcoder_core/target/
+smartcoder_core.pyd
+
+# Environment and local state
+.env
+.env.local
+.env.*.local
+amplify_outputs.json
+.kilroy/memory.db*
+.kilroy/staging/
+.kilroy/sandboxes/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+smartcoder/build/
+smartcoder/dist/
+smartcoder/*.egg-info/
+smartcoder/vector_store/
+.pytest_cache/
+smartcoder/.pytest_cache/
+smartcoder/**/.pytest_cache/
+
+# TypeScript generated output
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Scratch scripts
+scripts/check_*.ps1
+scripts/cleanup_*.ps1
+%TEMP%/

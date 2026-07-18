@@ -1,0 +1,20 @@
+{
+  "signature": "7a117d1c7714138f6cac1c49464ca82230aedcef140669f603cad7026079615b",
+  "params": {
+    "dataset_keys": [
+      "glaive",
+      "codealpaca"
+    ],
+    "splits": [
+      "train",
+      "train"
+    ],
+    "max_items_per_dataset": 5000,
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+    "normalize": true,
+    "chunk_size": 1200,
+    "chunk_overlap": 150
+  },
+  "num_chunks": 17248,
+  "num_documents": 10000
+}

@@ -1,0 +1,8 @@
+This directory holds the bundled Ollama binary distributed inside Kilroy's
+NSIS installer. It is populated at build time by `npm run fetch:ollama`
+(scripts/fetch-ollama.ps1) which downloads the official Ollama Windows
+release and extracts it here.
+
+The directory is checked in EMPTY (just this .gitkeep) so the binary
+itself stays out of git history. Production builds depend on the fetch
+script being run before `tauri:build`.
