@@ -168,6 +168,10 @@ class ExecutionMemory:
 # ---------------------------------------------------------------------------
 
 
+class LockedDecisionError(RuntimeError):
+    """Raised when a caller tries to overwrite a locked decision."""
+
+
 @dataclass
 class LockedDecision:
     """An immutable decision that future agents must respect."""
@@ -185,8 +189,7 @@ class LockedDecision:
         self.locked = True
 
     def override(self, by: str, reason: str) -> None:
-        if not self.locked:
-            return
+        """Append a durable audit entry for an intentional override."""
         self.override_log.append(
             {
                 "timestamp": time.time(),
@@ -210,14 +213,25 @@ class DecisionRegistry:
         rationale: str = "",
         confidence: float = 0.5,
         lock: bool = False,
+        allow_override: bool = False,
     ) -> LockedDecision:
         if decision_id in self._decisions:
             existing = self._decisions[decision_id]
+            if existing.locked and not allow_override:
+                raise LockedDecisionError(
+                    f"Decision {decision_id!r} is locked and cannot be overwritten. "
+                    "Pass allow_override=True only after explicitly approving the replacement."
+                )
             if existing.locked:
                 existing.override(
                     by="maestro",
-                    reason=f"Re-recording locked decision {decision_id}",
+                    reason=f"Replaced by new record: {decision[:80]}",
                 )
+                existing.decision = decision
+                existing.rationale = rationale
+                existing.confidence = confidence
+                existing.timestamp = time.time()
+                return existing
         entry = LockedDecision(
             decision_id=decision_id,
             decision=decision,
@@ -429,8 +443,8 @@ class TechnicalReviewBoard:
             elif any(k in c for k in ("scalab", "throughput", "latency", "concurrent")):
                 notes = "Scalability vocabulary found in output."
             else:
-                notes = "No scalability heuristics matched; agent-based review recommended."
-                severity = "warning"
+                notes = "No scalability heuristics matched; review recommended for large-scale use."
+                severity = "info"
         elif name == "architecture_fit":
             import re as _re
 
@@ -532,7 +546,7 @@ class KilroyPersona:
                 raw = persona_file.read_text(encoding="utf-8")
                 self._parse(raw)
                 logger.info("Persona loaded from %s", persona_file)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - malformed user persona falls back safely.
                 logger.warning("Failed to load persona: %s — using default.", exc)
                 self._parse(_DEFAULT_PERSONA)
         else:
@@ -795,7 +809,7 @@ class ExecutionTelemetry:
             "",
             "## Agent Participation",
         ]
-        for key, ap in self.participation.items():
+        for ap in self.participation.values():
             duration = (ap.end_time - ap.start_time) if ap.end_time else 0.0
             parts.append(
                 f"- {ap.agent_role}: {duration:.2f}s, "

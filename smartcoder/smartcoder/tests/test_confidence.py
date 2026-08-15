@@ -30,6 +30,7 @@ from smartcoder.intelligence import (
     DecisionRegistry,
     ExecutionMemory,
     ExecutionTelemetry,
+    LockedDecisionError,
 )
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,30 @@ def _empty_quality_report() -> QualityReport:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+def test_package_root_reexports_canonical_intelligence() -> None:
+    import smartcoder
+
+    assert smartcoder.DecisionRegistry is DecisionRegistry
+    assert smartcoder.LockedDecisionError is LockedDecisionError
+
+
+def test_locked_decision_requires_explicit_override() -> None:
+    registry = DecisionRegistry()
+    original = registry.record("storage", "sqlite", lock=True)
+
+    try:
+        registry.record("storage", "postgres")
+    except LockedDecisionError:
+        pass
+    else:
+        raise AssertionError("locked decision was silently overwritten")
+
+    replacement = registry.record("storage", "postgres", allow_override=True)
+    assert replacement is original
+    assert replacement.decision == "postgres"
+    assert replacement.override_log
 
 
 def test_empty_output_is_strong_negative() -> None:

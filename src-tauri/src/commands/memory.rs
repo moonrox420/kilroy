@@ -11,7 +11,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir_lite::WalkDir;
 
 // ─── Open / current project ─────────────────────────────────────────────────
@@ -34,6 +34,7 @@ pub struct OllamaStatus {
 
 #[tauri::command]
 pub async fn open_project(
+    app: AppHandle,
     state: State<'_, AppState>,
     path: String,
 ) -> Result<ProjectOpened, String> {
@@ -42,7 +43,12 @@ pub async fn open_project(
         return Err(format!("path does not exist: {}", path));
     }
 
-    let memory = Memory::open(&p).map_err(|e| format!("open memory: {:#}", e))?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("resolve app data directory: {error}"))?;
+    let memory =
+        Memory::open(&p, &app_data_dir).map_err(|e| format!("open memory: {:#}", e))?;
 
     let mode_str = mode_as_str(*state.agent_mode.lock());
 

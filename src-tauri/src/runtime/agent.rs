@@ -67,6 +67,8 @@ pub struct AgentRequest {
     pub session_id: Option<i64>,
     pub mode: RuntimeMode,
     pub message: String,
+    pub smartcoder_context: Option<String>,
+    pub images: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +179,10 @@ pub async fn run_code(
         "Investigating the project",
     );
     let mut evidence = initial_context(context);
+    if let Some(smartcoder_context) = request.smartcoder_context.as_deref() {
+        evidence.push_str("\n\nSMART CODER BACKEND ANALYSIS\n");
+        evidence.push_str(&bounded(smartcoder_context, 12_000));
+    }
     let mut pending_action_ids = Vec::new();
     let mut model_calls = 0_i64;
 
@@ -202,9 +208,14 @@ pub async fn run_code(
 
         let decision = state
             .chat
-            .generate_json::<AgentDecision>(
+            .generate_json_with_images::<AgentDecision>(
                 system_prompt(),
                 &decision_prompt(&request.message, &evidence, ordinal),
+                if ordinal == 1 {
+                    request.images.clone()
+                } else {
+                    None
+                },
                 Some(ChatOptions {
                     temperature: Some(0.1),
                     num_predict: Some(3072),

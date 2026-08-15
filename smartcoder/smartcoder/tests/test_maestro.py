@@ -4,7 +4,7 @@
 # Run via pytest:  pytest smartcoder/tests/test_maestro.py -v
 #
 # These tests mock CodingAssistant to avoid LLM dependencies and verify
-# the state machine logic: short-circuit, normal flow, retry on failure,
+# the state machine logic: short-circuit, normal flow, failure propagation,
 # and block termination.
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from smartcoder.controllers.maestro import SmartCoderController
 from smartcoder.runtime.config import AppConfig
 
@@ -30,12 +29,15 @@ def config() -> AppConfig:
 
 
 @pytest.fixture
-def controller(config: AppConfig) -> SmartCoderController:
+def controller(config: AppConfig, monkeypatch: pytest.MonkeyPatch) -> SmartCoderController:
     """Controller with a mocked CodingAssistant so no LLM is called."""
-    ctrl = SmartCoderController(config)
-    # Replace the real assistant with a mock that returns canned output.
     mock_assistant = MagicMock()
-    mock_assistant.run.return_value = "def add(a, b): return a + b"
+    mock_assistant.ask.return_value = "def add(a, b): return a + b"
+    monkeypatch.setattr(
+        "smartcoder.controllers.maestro.CodingAssistant",
+        lambda *_args, **_kwargs: mock_assistant,
+    )
+    ctrl = SmartCoderController(config)
     ctrl._assistant = mock_assistant
     return ctrl
 
@@ -68,41 +70,28 @@ def test_normal_workflow_advances_through_states(
     assert controller.telemetry.timeline is not None
 
 
-def test_retry_on_failure(controller: SmartCoderController) -> None:
-    """When an agent fails, the controller should retry in place."""
-    # Make the assistant fail on first call, succeed on second.
-    call_count = 0
-
-    def _mock_run(task: str) -> str:
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise RuntimeError("Simulated transient failure")
-        return "def add(a, b): return a + b"
-
-    controller._assistant.run = _mock_run  # type: ignore[method-assign]
-
-    with patch.object(controller, "_is_trivial_task", return_value=False):
-        result = controller.run("Add two numbers")
-    assert result is not None
-    assert controller.workflow.is_complete
+def test_agent_failure_propagates(controller: SmartCoderController) -> None:
+    """A specialist crash must fail the command instead of becoming output."""
+    controller._assistant.ask.side_effect = RuntimeError("Simulated agent failure")
+    with (
+        patch.object(controller, "_is_trivial_task", return_value=False),
+        pytest.raises(RuntimeError, match="Simulated agent failure"),
+    ):
+        controller.run("Add two numbers")
 
 
 def test_block_terminates_workflow(controller: SmartCoderController) -> None:
     """A BLOCKED signal from quality gate should terminate the workflow."""
     # Force the quality gate to produce a BLOCKED result by making the
     # agent output something the gate recognises as blocked.
-    controller._assistant.run = MagicMock(
-        return_value="BLOCKED: Cannot proceed without more context."
-    )  # type: ignore[method-assign]
+    controller._assistant.ask.return_value = "BLOCKED: Cannot proceed without more context."
 
-    with patch.object(controller, "_is_trivial_task", return_value=False):
-        result = controller.run("Do something impossible")
-    # The workflow should have terminated (is_complete = True) even though
-    # the quality gate blocked it.
+    with (
+        patch.object(controller, "_is_trivial_task", return_value=False),
+        pytest.raises(RuntimeError, match="Agent reported a blocker"),
+    ):
+        controller.run("Do something impossible")
     assert controller.workflow.is_complete
-    # The result should contain the blocked signal
-    assert result is not None
 
 
 def test_reset_clears_state(controller: SmartCoderController) -> None:

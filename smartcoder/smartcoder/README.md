@@ -1,70 +1,19 @@
-# SmartCoder — local RAG coding agent
+# Kilroy Smart Coder backend
 
-A self-correcting coding agent: a [smolagents](https://github.com/huggingface/smolagents)
-`CodeAgent` that writes Python, executes it, reads the traceback when it fails, and
-fixes itself — grounded by retrieval-augmented generation (RAG) over Hugging Face code
-datasets (`glaiveai/glaive-code-assistant` + `HuggingFaceH4/CodeAlpaca_20K`) via a
-persisted FAISS index. It talks to the same local **Ollama** daemon Kilroy uses, so no
-API keys and nothing leaves your machine.
+This directory is the canonical `smartcoder` Python package used by both the
+standalone CLI and Kilroy's Tauri desktop runtime. It is not a separate product
+or a second application: Smart Coder provides project-grounded analysis and
+Kilroy's Rust runtime applies any proposed mutations through its approval gate.
 
-Two modules, flat layout:
+The package uses local model backends only. Ollama is the default. Optional
+dataset retrieval persists a pickle-free NumPy index as `embeddings.npy` plus
+`documents.jsonl`; no FAISS pickle is required by the desktop path.
 
-| File                   | Role                                                                                                                                                                                                |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kilroy_retrieval.py`  | RAG engine — dataset adapters, code-aware chunking, bge embeddings, FAISS build/persist/load, and the `RetrieverTool` the agent calls.                                                              |
-| `kilroy_smartcoder.py` | The agent + CLI — model backends (Ollama primary; langchain-ollama, llama.cpp, HF Inference, OpenAI fallbacks), the `CodeAgent`, and the `build-index` / `ask` / `chat` / `list-datasets` commands. |
-
-## Standalone install
-
-From this `smartcoder/` directory:
+Install from the parent `smartcoder/` packaging root:
 
 ```powershell
-# 3.10+ required. A venv is recommended.
-pip install .
-# optional extras: .[llama-cpp]  .[docker]  .[dev]
+uv pip install --python ../.venv/Scripts/python.exe --no-deps .
 ```
 
-That creates two console scripts: `smartcoder` and `smartcoder-build-index`.
-
-Pull the coding model in Ollama first (default is `qwen2.5-coder:14b-instruct-q8_0`; any
-Ollama coding model works — override with `--model`):
-
-```powershell
-ollama pull qwen2.5-coder:14b-instruct-q8_0
-```
-
-## Use
-
-```powershell
-smartcoder build-index                      # build/refresh the FAISS index (one-time)
-smartcoder ask "write a thread-safe LRU cache with unit tests"
-smartcoder chat                              # interactive REPL
-smartcoder list-datasets --hub              # show pre-wired (and Hub) datasets
-```
-
-Key flags (all subcommands): `--backend {ollama,langchain_ollama,llama_cpp}` (all local by design),
-`--model`, `--ollama-host`, `--embedding-model`, `--index-dir`, `--datasets`, `--max-items`,
-`--sandbox {local,docker}`, `--web-search` (opt-in; offline by default), `--log-level`.
-
-> **Security:** `--sandbox local` (the default) executes model-generated Python in the
-> current process. Use `--sandbox docker` (local Docker daemon) for untrusted workloads.
-
-### Prebuilt index
-
-If you already have an `index.faiss` + `index.pkl` + `build_meta.json` set, drop them in
-the `--index-dir` (default `vector_store/`). The engine reloads a persisted index instantly
-when its build signature matches; otherwise it rebuilds and re-persists.
-
-## Kilroy desktop integration
-
-The Kilroy app talks to SmartCoder over a Tauri bridge (`src-tauri/src/commands/smartcoder.rs`):
-
-- `smartcoder_status()` — probes for Python + the `smartcoder` console script (or this
-  vendored copy) and reports whether it can run.
-- `smartcoder_run(subcommand, args)` — launches the agent, streams its output to the UI on
-  `smartcoder://output` (per line, tagged `stdout`/`stderr`), and finishes on
-  `smartcoder://done` with the exit code.
-
-The bridge prefers the installed `smartcoder` console script and falls back to
-`python smartcoder/kilroy_smartcoder.py`, so `pip install smartcoder` from the repo root
-is the most robust setup.
+The supported entry points are `smartcoder` and `smartcoder-build-index`. See
+the parent `README.md` for setup, bootstrap, and desktop integration details.

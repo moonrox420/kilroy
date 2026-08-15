@@ -100,6 +100,20 @@ class QualityGate:
     def __init__(self) -> None:
         self.report = QualityReport()
 
+    @staticmethod
+    def _runtime_failure(output: str) -> str | None:
+        lowered = output.lower()
+        for marker in (
+            "missing required package(s):",
+            "agent execution exceeded",
+            "smart coder worker exited",
+            "modulenotfounderror:",
+            "importerror:",
+        ):
+            if marker in lowered:
+                return marker.rstrip(":")
+        return None
+
     def evaluate(
         self,
         state: WorkflowState,
@@ -125,6 +139,16 @@ class QualityGate:
     def _check_implementation(self, output: str | None, context: dict[str, Any]) -> None:
         if not output or not output.strip():
             self.report.add("implementation_output", False, "No output produced.")
+            return
+
+        runtime_failure = self._runtime_failure(output)
+        if runtime_failure:
+            self.report.add(
+                "runtime_failure",
+                False,
+                f"Agent runtime failed ({runtime_failure}).",
+                severity="critical",
+            )
             return
 
         if "BLOCKED:" in output.upper():
@@ -162,6 +186,16 @@ class QualityGate:
             self.report.add("test_output", False, "No test output produced.")
             return
 
+        runtime_failure = self._runtime_failure(output)
+        if runtime_failure:
+            self.report.add(
+                "runtime_failure",
+                False,
+                f"Test agent runtime failed ({runtime_failure}).",
+                severity="critical",
+            )
+            return
+
         upper = output.upper()
 
         # P2-1: case-insensitive "BLOCKED" check (was case-sensitive).
@@ -183,6 +217,16 @@ class QualityGate:
     def _check_review(self, output: str | None, context: dict[str, Any]) -> None:
         if not output or not output.strip():
             self.report.add("review_output", False, "No review output produced.")
+            return
+
+        runtime_failure = self._runtime_failure(output)
+        if runtime_failure:
+            self.report.add(
+                "runtime_failure",
+                False,
+                f"Review agent runtime failed ({runtime_failure}).",
+                severity="critical",
+            )
             return
 
         upper = output.upper()
@@ -212,6 +256,21 @@ class QualityGate:
         history = context.get("workflow_history", [])
         if not history:
             self.report.add("workflow_history", False, "No workflow history recorded.")
+            return
+
+        failed_roles = [
+            role
+            for role, result in context.get("agent_results", {}).items()
+            if getattr(result, "confidence", 1.0) <= 0.0
+            or getattr(result, "risk_level", "") == "critical"
+        ]
+        if failed_roles:
+            self.report.add(
+                "agent_failures",
+                False,
+                f"Specialist runtime failures: {', '.join(sorted(failed_roles))}.",
+                severity="critical",
+            )
             return
 
         self.report.add("workflow_history", True, f"Workflow completed {len(history)} steps.")

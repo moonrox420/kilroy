@@ -185,11 +185,27 @@ impl ChatClient {
         user: &str,
         options: Option<ChatOptions>,
     ) -> Result<T> {
+        self.generate_json_with_images(system, user, None, options)
+            .await
+    }
+
+    /// One-shot JSON-mode completion with optional vision input.
+    pub async fn generate_json_with_images<T: serde::de::DeserializeOwned>(
+        &self,
+        system: &str,
+        user: &str,
+        images: Option<Vec<String>>,
+        options: Option<ChatOptions>,
+    ) -> Result<T> {
         let url = self.endpoint();
         let model = self.model();
         let msgs = vec![
             ChatMessage::text("system", system),
-            ChatMessage::text("user", user),
+            ChatMessage {
+                role: "user".to_string(),
+                content: user.to_string(),
+                images,
+            },
         ];
         let body = ChatRequest {
             model: &model,

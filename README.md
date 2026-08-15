@@ -2,7 +2,7 @@
 
 **Local AI agentic software engineering platform** — Windows 11 native, Tauri 2 + Rust + React.
 
-> **No API keys. No remote auth. No cloud round-trip.** Every model call goes to `http://localhost:11434` (Ollama). The codebase contains zero references to OpenAI, Anthropic, bearer tokens, or Authorization headers. Grep it yourself: `grep -ri "api[_-]key\|bearer\|authorization" .` — only hits are the `class-variance-authority` library name and the LLM-token counters returned by Ollama.
+> **No API keys. No remote auth. No cloud model round-trip.** Kilroy's supported model backends are local Ollama, local llama.cpp, and LangChain's local Ollama adapter. The Python dependency lock may contain SDKs required transitively by agent libraries, but Kilroy does not expose or select cloud model backends.
 
 This is the full application, not a shell. Every panel is wired, the file explorer browses real disk, the terminal spawns a real PowerShell PTY, and the agent chat round-trips through Rust. The "brain" is implemented and wired end to end: the planner decomposes a goal into a task graph (`runtime/planner.rs`), the executor runs the tasks and streams their output live (`runtime/executor.rs`), the actuator parses code blocks into reviewable file-write / patch / shell actions that apply only on your Accept (`actuator/`), and per-project memory + retrieval persist to SQLite + sqlite-vec. Model calls are settings-driven against local Ollama (`generation.rs`); pick any installed model in Settings.
 
@@ -47,7 +47,8 @@ If you want to do the same steps manually, use this exact order:
 ```powershell
 uv --version
 uv venv .venv
-uv pip install -r requirements.txt
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+uv pip install --python .venv\Scripts\python.exe --no-deps .\smartcoder
 npm install
 npm run tauri:dev
 ```

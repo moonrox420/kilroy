@@ -9,6 +9,8 @@
     "dev:hard-reset": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-Process kilroy,msedgewebview2,node -ErrorAction SilentlyContinue | Stop-Process -Force; Remove-Item -Recurse -Force src-tauri\\\\target -ErrorAction SilentlyContinue; Remove-Item -Recurse -Force node_modules\\\\\\\\.vite -ErrorAction SilentlyContinue\" && powershell -NoProfile -Command \"$cargoHome = Join-Path $env:USERPROFILE '.cargo'; $rustupHome = Join-Path $env:USERPROFILE '.rustup'; $cargoBin = Join-Path $cargoHome 'bin'; $env:CARGO_HOME = $cargoHome; $env:RUSTUP_HOME = $rustupHome; $env:Path = $cargoBin + ';' + $env:Path; tauri dev\"",
     "dev:fresh": "powershell -NoProfile -Command \"if (Test-Path node_modules\\\\\\\\.vite) { Remove-Item -Recurse -Force node_modules\\\\\\\\.vite }\" && vite",
     "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "check": "npm run build && npm test",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "powershell -NoProfile -Command \"$cargoHome = Join-Path $env:USERPROFILE '.cargo'; $rustupHome = Join-Path $env:USERPROFILE '.rustup'; $cargoBin = Join-Path $cargoHome 'bin'; $env:CARGO_HOME = $cargoHome; $env:RUSTUP_HOME = $rustupHome; $env:Path = $cargoBin + ';' + $env:Path; tauri dev\"",

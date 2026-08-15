@@ -12,9 +12,11 @@ FIXES:
 
 from __future__ import annotations
 
-import concurrent.futures
 import logging
+import multiprocessing
+import queue
 import threading
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -42,37 +44,29 @@ logger = logging.getLogger("smartcoder.agent")
 class TimeoutException(Exception):
     """Raised when agent execution exceeds the allowed time limit."""
 
-    pass
+
+class AgentProcessError(RuntimeError):
+    """Raised when the isolated Smart Coder worker fails."""
 
 
-class _TimeoutContext:
-    """Context manager for timeout-based execution using concurrent.futures."""
-
-    def __init__(self, seconds: int) -> None:
-        self.seconds = seconds
-        self._pool: concurrent.futures.ThreadPoolExecutor | None = None
-        self._future: concurrent.futures.Future | None = None
-
-    def __enter__(self) -> "_TimeoutContext":
-        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        if self._future is not None and not self._future.done():
-            self._future.cancel()
-        if self._pool is not None:
-            self._pool.shutdown(wait=False)
-
-    def run(self, fn, *args, **kwargs):
-        self._future = self._pool.submit(fn, *args, **kwargs)
-        try:
-            return self._future.result(timeout=self.seconds)
-        except concurrent.futures.TimeoutError:
-            self._future.cancel()
-            raise TimeoutException(
-                f"Agent execution exceeded {self.seconds}s timeout. "
-                f"Possible infinite loop or model misconfiguration."
+def _agent_process_main(
+    config: AppConfig,
+    task: str,
+    prior_stage_context: str | None,
+    result_queue: Any,
+) -> None:
+    """Run one agent turn in an independently terminable process."""
+    try:
+        assistant = CodingAssistant(config, DependencyManager())
+        result = assistant._ask_inline(task, prior_stage_context)
+        result_queue.put(("ok", result))
+    except Exception as exc:  # noqa: BLE001 - serialize worker failures for the parent.
+        result_queue.put(
+            (
+                "error",
+                f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
             )
+        )
 
 
 class CodingAssistant:
@@ -242,17 +236,53 @@ class CodingAssistant:
         if not task or not task.strip():
             raise ValueError("Task prompt must be a non-empty string.")
 
-        agent = self._build_agent()
-
         logger.info("Executing task with timeout=%ds", timeout_seconds)
 
-        try:
-            ctx = _TimeoutContext(timeout_seconds)
-            with ctx:
-                result = ctx.run(agent.run, self._compose_task(task, prior_stage_context))
-        except TimeoutException:
+        if timeout_seconds <= 0:
+            return self._ask_inline(task, prior_stage_context)
+
+        process_context = multiprocessing.get_context("spawn")
+        result_queue = process_context.Queue(maxsize=1)
+        process = process_context.Process(
+            target=_agent_process_main,
+            args=(self.config, task, prior_stage_context, result_queue),
+            daemon=False,
+            name=f"smartcoder-{self.config.task_role or 'agent'}",
+        )
+        process.start()
+        process.join(timeout_seconds)
+
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+            if process.is_alive():
+                process.kill()
+                process.join(5)
+            result_queue.close()
+            result_queue.join_thread()
             logger.error("Task timed out after %ds", timeout_seconds)
-            raise
+            raise TimeoutException(
+                f"Agent execution exceeded {timeout_seconds}s timeout and was terminated."
+            )
+
+        try:
+            status, payload = result_queue.get(timeout=1)
+        except queue.Empty as exc:
+            raise AgentProcessError(
+                f"Smart Coder worker exited with code {process.exitcode} without returning a result."
+            ) from exc
+        finally:
+            result_queue.close()
+            result_queue.join_thread()
+
+        if status != "ok":
+            raise AgentProcessError(payload)
+        return payload
+
+    def _ask_inline(self, task: str, prior_stage_context: str | None = None) -> str:
+        """Execute inside the isolated worker process."""
+        agent = self._build_agent()
+        result = agent.run(self._compose_task(task, prior_stage_context))
 
         logger.debug("Agent result type=%s", type(result).__name__)
 

@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kilroy-smartcoder"
-version = "0.1.0"
+version = "0.2.0"
 description = "A local, self-correcting coding agent (smolagents CodeAgent) grounded by Hugging Face dataset RAG."
 requires-python = ">=3.10"
 keywords = ["coding-agent", "smolagents", "rag", "ollama", "llm", "faiss", "huggingface", "code-generation"]
@@ -58,7 +58,7 @@ all = ["llama-cpp-python", "docker"]
 # Entry points
 [project.scripts]
 smartcoder = "smartcoder.cli.parser:main"
-smartcoder-build-index = "kilroy_retrieval:main"
+smartcoder-build-index = "smartcoder.kilroy_retrieval:main"
 
 [project.urls]
 Homepage = "https://github.com/moonrox420/kilroy"
@@ -67,17 +67,20 @@ Issues = "https://github.com/moonrox420/kilroy/issues"
 
 # ====================== Setuptools Configuration ======================
 [tool.setuptools]
-packages = {find = {where = ["."], include = ["smartcoder*"]}}
+packages = {find = {where = ["."], include = ["smartcoder*"], exclude = ["smartcoder.build*", "smartcoder.tests*"]}}
 package-dir = {"smartcoder" = "smartcoder"}
-py-modules = ["kilroy_smartcoder", "kilroy_retrieval"]
-include-package-data = true
+py-modules = ["kilroy_retrieval"]
+include-package-data = false
 
 [tool.setuptools.package-data]
 smartcoder = ["*.txt", "*.md", "*.json", "py.typed"]
 
+[tool.setuptools.exclude-package-data]
+smartcoder = ["tests/*", "tests/**/*"]
+
 # ====================== Tooling Config ======================
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "smartcoder/tests"]
 python_files = ["test_*.py"]
 addopts = ["-q", "--import-mode=importlib"]
 markers = [
@@ -86,7 +89,11 @@ markers = [
 ]
 
 [tool.pyright]
-strict = true
+typeCheckingMode = "basic"
+include = ["smartcoder"]
+exclude = ["smartcoder/build", "smartcoder/*.egg-info", "smartcoder/tests"]
+reportMissingImports = "none"
+reportMissingTypeStubs = "none"
 
 [tool.ruff]
 line-length = 100

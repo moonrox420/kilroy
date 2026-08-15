@@ -44,10 +44,12 @@ struct DoneEvent {
 }
 
 fn smartcoder_index_ready(project_root: Option<&Path>) -> bool {
-    let Some(dir) = vendored_script(project_root).and_then(|p| p.parent().map(|d| d.join("vector_store"))) else {
+    let Some(dir) = vendored_script(project_root)
+        .and_then(|path| path.parent().map(|parent| parent.join("vector_store")))
+    else {
         return false;
     };
-    dir.join("index.faiss").is_file() && dir.join("index.pkl").is_file()
+    dir.join("embeddings.npy").is_file() && dir.join("documents.jsonl").is_file()
 }
 
 fn matches_ollama_model(installed: &str, configured: &str) -> bool {
@@ -55,9 +57,10 @@ fn matches_ollama_model(installed: &str, configured: &str) -> bool {
         return true;
     }
     let base = configured.split(':').next().unwrap_or(configured);
+    let installed_base = installed.split(':').next().unwrap_or(installed);
     installed == base
         || installed.starts_with(&format!("{base}:"))
-        || configured.starts_with(&format!("{}:", installed.split(':').next().unwrap_or(installed)))
+        || configured.starts_with(&format!("{installed_base}:"))
 }
 
 #[tauri::command]
@@ -200,7 +203,7 @@ pub async fn smartcoder_run(
             let _ = std::fs::remove_file(path);
         }
         let (code, success) = match &result {
-            Ok((code, _)) => (*code, code.unwrap_or(1) == 0),
+            Ok(process) => (process.code, process.code.unwrap_or(1) == 0),
             Err(_) => (None, false),
         };
         let _ = coordinator.emit("smartcoder://done", DoneEvent { code, success });

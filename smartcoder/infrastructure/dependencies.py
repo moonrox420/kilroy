@@ -16,11 +16,11 @@ REFACTOR NOTES (see remediation PRD):
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 
 class MissingDependencyError(RuntimeError):
     """Raised when a required Python dependency is not installed."""
-
-    pass
 
 
 class DependencyManager:
@@ -29,7 +29,7 @@ class DependencyManager:
     # Map of (import_name) -> {"pip_name": str, "min_version": str | None}
     # When min_version is set, require() checks the installed version and
     # includes the constraint in the error message if the version is too old.
-    _packages: dict[str, dict[str, str | None]] = {
+    _packages: ClassVar[dict[str, dict[str, str | None]]] = {
         "smolagents": {"pip_name": "smolagents", "min_version": None},
         "litellm": {"pip_name": "litellm", "min_version": None},
         "datasets": {"pip_name": "datasets", "min_version": None},
@@ -76,7 +76,7 @@ class DependencyManager:
             return f">={mv}"
         return ""
 
-    def _check_version(self, import_name: str, min_version: str) -> str | None:
+    def _check_version(self, import_name: str, pip_name: str, min_version: str) -> str | None:
         """Return an error string if the installed *import_name* is below *min_version*.
 
         Returns `None` (treated by the caller as "can't verify, assume OK")
@@ -114,7 +114,7 @@ class DependencyManager:
         # Probe the package. We cache only SUCCESSES so that a runtime
         # install (e.g. pip install in a long-lived session) takes effect
         # on the next check. Cache misses are re-probed each time.
-        if package in self.available and self.available[package]:
+        if self.available.get(package):
             return True
         try:
             __import__(package)
@@ -133,9 +133,7 @@ class DependencyManager:
         # If any requested package declares a min_version, `packaging` is a
         # transitive hard requirement for checking it — surface that plainly
         # instead of letting `_check_version` raise a raw ImportError (P2-9).
-        needs_version_check = any(
-            self._packages.get(p, {}).get("min_version") for p in packages
-        )
+        needs_version_check = any(self._packages.get(p, {}).get("min_version") for p in packages)
         if needs_version_check and not self._probe("packaging"):
             missing.append("packaging")
 
@@ -148,7 +146,7 @@ class DependencyManager:
             if meta is not None:
                 mv = meta.get("min_version")
                 if mv:
-                    err = self._check_version(p, mv)
+                    err = self._check_version(p, self._pkg(p), mv)
                     if err is not None:
                         outdated.append(err)
 

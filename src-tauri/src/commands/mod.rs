@@ -12,4 +12,5 @@ pub mod plan;
 pub mod refactor;
 pub mod settings;
 pub mod skills;
+pub mod smartcoder;
 pub mod terminal;
