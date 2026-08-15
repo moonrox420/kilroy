@@ -2,7 +2,8 @@
 //!
 //! Behaviour by mode:
 //!
-//! * CodeAgent (SmartCoder) — default; Python smolagents subprocess writes, runs, self-corrects.
+//! * CodeAgent (SmartCoder) — default; Python Smart Coder supplies project-grounded
+//!   analysis to the approval-gated Rust executor.
 //! * Copilot — quick-reply Ollama stream only; no execution loop.
 //! * Governance — analysis-only single-shot, low temperature, no edits.
 //! * Autonomous — planner produces a task DAG, persists it `pending`, then returns immediately; the frontend reviews and calls `execute_plan` to run it.
@@ -11,13 +12,16 @@
 //! Every send/reply pair is persisted to `messages` and recorded in `activity`.
 
 pub use super::agent_context::AgentContext;
-use super::agent_context::{gather_agent_context, BuiltAgentContext};
+use super::agent_context::{gather_agent_context, BuiltAgentContext, KilroyProjectContext};
 use crate::commands::memory::{require_memory, require_session};
 use crate::db::{activity, agent_runtime, messages, tasks};
 use crate::generation::{ChatMessage as LlmMessage, ChatOptions};
 use crate::runtime::agent::{self as rust_agent, AgentRequest, RuntimeMode};
 use crate::runtime::events::{PlanReady, PlannedTask, RunStarted};
 use crate::runtime::planner;
+use crate::smartcoder_runner::{
+    build_smartcoder_argv, run_smartcoder_ask_blocking, write_context_temp_file, StreamSink,
+};
 use crate::state::{AgentMode, AppState};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -77,9 +81,12 @@ pub async fn agent_send_message(
     payload: SendMessagePayload,
 ) -> Result<AgentMessage, String> {
     let mode = *state.agent_mode.lock();
-    let user_msg = payload.message.trim().to_string();
-    if user_msg.is_empty() {
+    let mut user_msg = payload.message.trim().to_string();
+    if user_msg.is_empty() && payload.images.as_ref().is_none_or(Vec::is_empty) {
         return Err("empty message".into());
+    }
+    if user_msg.is_empty() {
+        user_msg = "Analyze the attached image and respond to what it contains.".to_string();
     }
 
     let project_id_opt = *state.current_project_id.lock();
@@ -111,32 +118,29 @@ pub async fn agent_send_message(
     // 3. Dispatch by mode.
     match mode {
         AgentMode::CodeAgent => {
-            // Pure explanation questions already have retrieved context — don't
-            // spawn a 3-step CodeAgent loop that tries to open() files and
-            // dumps step logs into the chat bubble.
-            let content = if is_conversational_query(&user_msg) {
-                run_single_shot(
-                    &app,
-                    &state,
-                    mode,
-                    &user_msg,
-                    &ctx,
-                    &recent_msgs,
-                    &overview_for_prompt,
-                    payload.images.clone(),
-                )
-                .await
-            } else {
-                run_tool_agent(
-                    &app,
-                    &state,
-                    &user_msg,
-                    &built,
-                    &run_id,
-                    session_id_opt,
-                    RuntimeMode::Code,
-                )
-                .await
+            let smartcoder = run_smartcoder_analysis(&app, &state, &user_msg, &built).await;
+            let content = match smartcoder {
+                Ok(analysis)
+                    if is_conversational_query(&user_msg)
+                        && payload.images.as_ref().is_none_or(Vec::is_empty) =>
+                {
+                    analysis
+                }
+                Ok(analysis) => {
+                    run_tool_agent(
+                        &app,
+                        &state,
+                        &user_msg,
+                        &built,
+                        &run_id,
+                        session_id_opt,
+                        RuntimeMode::Code,
+                        Some(analysis),
+                        payload.images.clone(),
+                    )
+                    .await
+                }
+                Err(error) => format!("Smart Coder backend failed: {error}"),
             };
             persist_reply(&state, session_id_opt, &content, &ctx);
             Ok(AgentMessage {
@@ -203,6 +207,8 @@ pub async fn agent_send_message(
                 &run_id,
                 session_id_opt,
                 RuntimeMode::ReviewDebug,
+                None,
+                payload.images.clone(),
             )
             .await;
             persist_reply(&state, session_id_opt, &content, &ctx);
@@ -363,17 +369,83 @@ async fn run_tool_agent(
     run_id: &str,
     session_id: Option<i64>,
     mode: RuntimeMode,
+    smartcoder_context: Option<String>,
+    images: Option<Vec<String>>,
 ) -> String {
     let request = AgentRequest {
         run_id: run_id.to_string(),
         session_id,
         mode,
         message: user_msg.to_string(),
+        smartcoder_context,
+        images,
     };
     match rust_agent::run_code(app, state.inner(), request, built).await {
         Ok(run) => run.summary,
         Err(error) => format!("Code runtime failed: {error:#}"),
     }
+}
+
+async fn run_smartcoder_analysis(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    user_msg: &str,
+    built: &BuiltAgentContext,
+) -> Result<String, String> {
+    let project_root = built.project_root.clone();
+    let context: KilroyProjectContext = built.into();
+    let context_path = write_context_temp_file(&context)?;
+    let (ollama_host, chat_model) = {
+        let settings = state.settings.read();
+        (settings.ollama_url.clone(), settings.chat_model.clone())
+    };
+    let launch_result = build_smartcoder_argv(
+        "ask",
+        &[user_msg.to_string()],
+        project_root.as_deref(),
+        &ollama_host,
+        &chat_model,
+        Some(&context_path),
+        project_root.as_deref(),
+        true,
+        Some("architect"),
+        Some("analysis"),
+    );
+    let launch = match launch_result {
+        Ok(launch) => launch,
+        Err(error) => {
+            let _ = std::fs::remove_file(context_path);
+            return Err(error);
+        }
+    };
+    let sink = StreamSink::SmartCoderPanel { app: app.clone() };
+    let argv = launch.argv;
+    let workdir = launch.workdir;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let result = run_smartcoder_ask_blocking(&argv, workdir.as_deref(), &sink);
+        let _ = std::fs::remove_file(context_path);
+        result
+    })
+    .await
+    .map_err(|error| format!("Smart Coder worker join failed: {error}"))??;
+
+    if result.code.unwrap_or(1) != 0 {
+        let detail = if result.stderr.trim().is_empty() {
+            result.stdout.trim()
+        } else {
+            result.stderr.trim()
+        };
+        return Err(if detail.is_empty() {
+            format!("process exited with code {:?}", result.code)
+        } else {
+            detail.to_string()
+        });
+    }
+    let output = result.stdout.trim();
+    if output.is_empty() {
+        return Err("process completed without a response".to_string());
+    }
+    Ok(output.to_string())
 }
 
 fn is_simple_greeting(message: &str) -> bool {

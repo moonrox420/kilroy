@@ -19,9 +19,10 @@ import hashlib
 import json
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, ClassVar
 
 try:
     from smolagents import Tool as _ToolBase
@@ -136,7 +137,7 @@ def load_documents(
                 split=spec.split,
                 streaming=streaming,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - dataset adapters are third-party code.
             msg = f"{spec.hf_name}: {exc}"
             logger.error("Failed to load %s", msg)
             failures.append(msg)
@@ -208,7 +209,7 @@ def _auto_device(explicit: str | None) -> str:
             return "cuda"
         if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
             return "mps"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - device probes must safely fall back to CPU.
         logger.debug("Torch device probe failed (%s); defaulting to CPU", exc)
     return "cpu"
 
@@ -307,10 +308,10 @@ class PureNumPyVectorStore:
         self.vectors_path.chmod(0o600)
 
         with open(self.metadata_path, "w", encoding="utf-8") as fh:
-            for doc in self._documents:
-                fh.write(
-                    json.dumps({"page_content": doc.page_content, "metadata": doc.metadata}) + "\n"
-                )
+            fh.writelines(
+                json.dumps({"page_content": doc.page_content, "metadata": doc.metadata}) + "\n"
+                for doc in self._documents
+            )
         self.metadata_path.chmod(0o600)
 
     @classmethod
@@ -353,7 +354,7 @@ class PureNumPyVectorStore:
                             )
                         )
             return True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a corrupt cache must be rebuildable.
             logger.error("Failed to load numpy vector store: %s", exc)
             return False
 
@@ -539,7 +540,7 @@ class RetrieverTool(_ToolBase):  # type: ignore[invalid-base]
         "in concrete, working examples before writing your own solution."
     )
 
-    inputs = {
+    inputs: ClassVar[dict[str, dict[str, Any]]] = {
         "query": {
             "type": "string",
             "description": "Semantic query describing the code/concept you need examples of.",
@@ -567,7 +568,7 @@ class RetrieverTool(_ToolBase):  # type: ignore[invalid-base]
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.inputs = copy.deepcopy(self.__class__.inputs)
+        object.__setattr__(self, "inputs", copy.deepcopy(type(self).inputs))
         self.vectordb = vectordb
         self.all_sources = all_sources if all_sources is not None else extract_all_sources(vectordb)
         self.default_k = default_k
@@ -664,6 +665,21 @@ def build_retriever_tool(
         all_sources=extract_all_sources(vector_store),
         default_k=default_k,
     )
+
+
+def retrieve_context(
+    query: str,
+    top_k: int = 3,
+    dataset_keys: list[str] | tuple[str, ...] | None = None,
+    index_dir: str | os.PathLike[str] = DEFAULT_INDEX_DIR,
+) -> str:
+    """Initialize the safe index and return project-relevant context."""
+    tool = build_retriever_tool(
+        dataset_keys=dataset_keys,
+        index_dir=index_dir,
+        default_k=top_k,
+    )
+    return tool.forward(query=query, number_of_documents=top_k)
 
 
 def _configure_standalone_logging() -> None:

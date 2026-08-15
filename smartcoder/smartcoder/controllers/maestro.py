@@ -31,8 +31,8 @@ from smartcoder.controllers.quality import QualityGate, QualityReport
 from smartcoder.controllers.workflow import WorkflowEngine, WorkflowState
 from smartcoder.infrastructure.dependencies import DependencyManager
 from smartcoder.intelligence import (
-    AgentConsensus,
     AgentConflict,
+    AgentConsensus,
     AgentOpinion,
     AgentResult,
     DecisionRegistry,
@@ -212,6 +212,8 @@ class SmartCoderController:
                 if not review_report.overall_passed:
                     for issue in review_report.blocking_issues:
                         logger.warning("TRB blocking issue: %s", issue.notes)
+                    self.workflow.block(review_report.summary)
+                    break
 
             elif self.workflow.current_state == WorkflowState.FINALIZATION:
                 self._results["final"] = self._synthesize_intelligent(task)
@@ -231,6 +233,7 @@ class SmartCoderController:
                     agent_output=agent_output,
                     agent_role=self.workflow.agent_for_state(),
                     workflow_history=self.workflow.history,
+                    agent_results=self._agent_results,
                 )
                 self.telemetry.log_quality_gate(
                     gate_result.passed,
@@ -247,6 +250,19 @@ class SmartCoderController:
                         self.workflow.current_state.name,
                         gate_result.summary,
                     )
+
+                    terminal_gate = next(
+                        (
+                            gate
+                            for gate in gate_result.gates
+                            if not gate.passed
+                            and gate.gate_name in {"blocked_signal", "runtime_failure"}
+                        ),
+                        None,
+                    )
+                    if terminal_gate is not None:
+                        self.workflow.block(terminal_gate.message)
+                        break
 
                     if self.workflow.current_state in (
                         WorkflowState.IMPLEMENTATION,
@@ -286,6 +302,16 @@ class SmartCoderController:
                         self._retrying = True
                         agent_output = self._rerun_agent(task)
                         continue
+
+        if self.workflow.current_state in (WorkflowState.FAILED, WorkflowState.BLOCKED):
+            reason = self.workflow.metadata.get(
+                "failed_reason",
+                self.workflow.metadata.get(
+                    "blocked_reason", "Smart Coder workflow did not complete"
+                ),
+            )
+            self.telemetry.timeline.record("task_complete", f"Failed: {reason}")
+            raise RuntimeError(str(reason))
 
         logger.info(
             "Maestro completed task (states=%d, result_keys=%s)",
@@ -566,7 +592,7 @@ class SmartCoderController:
             self.telemetry.log_agent_end(ap, False, 0)
             if not self.failure_mode.active:
                 self.failure_mode.activate(trigger=str(exc))
-            return AgentResult(role=role, content=str(exc), confidence=0.0, risk_level="critical")
+            raise
 
     def _wrap_and_store_result(self, role: str, raw: Any) -> AgentResult:
         """Wrap a raw result into an AgentResult; store and feed to memory."""

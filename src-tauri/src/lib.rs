@@ -19,6 +19,7 @@ mod ollama_bundled;
 mod platform;
 mod runtime;
 mod settings;
+mod smartcoder_runner;
 mod state;
 mod tray;
 
@@ -138,6 +139,8 @@ pub fn run() {
             commands::agent::agent_send_message,
             commands::agent::agent_set_mode,
             commands::agent::agent_get_status,
+            commands::smartcoder::smartcoder_status,
+            commands::smartcoder::smartcoder_run,
             // Plan / runtime
             commands::plan::update_plan_task,
             commands::plan::delete_plan_task,

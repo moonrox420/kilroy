@@ -1,8 +1,9 @@
 //! Memory layer — SQLite + sqlite-vec.
 //!
-//! Kilroy's persistent brain. Every project has its own `.kilroy/memory.db`
-//! at the repo root, so memory travels with the code (commit it, gitignore
-//! it, your call). A single SQLite file holds:
+//! Kilroy's persistent brain. Kilroy repositories and projects that already
+//! opt into `.kilroy/` keep memory beside the code. Other projects use a
+//! stable, per-project directory under the operating system's app-data path.
+//! A single SQLite file holds:
 //!
 //! * Conversation history (sessions, messages)
 //! * Code chunks + their vector embeddings (semantic search)
@@ -28,6 +29,7 @@ pub mod tasks;
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use rusqlite::Connection;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Once};
 
@@ -56,7 +58,7 @@ impl Memory {
     /// Otherwise the DB is stored in the app-data directory
     /// (`<app config dir>/memories/<root_hash>/`), preventing `.kilroy/`
     /// from leaking into every random folder the user opens.
-    pub fn open(root: impl AsRef<Path>) -> Result<Self> {
+    pub fn open(root: impl AsRef<Path>, app_data_dir: &Path) -> Result<Self> {
         register_vec_extension();
 
         let root = root.as_ref().to_path_buf();
@@ -67,17 +69,11 @@ impl Memory {
             root.join(".kilroy")
         } else {
             // Foreign folder: route to app-data so we don't litter the user's FS.
-            let hash = {
-                use std::hash::{Hash, Hasher};
-                let mut s = std::collections::hash_map::DefaultHasher::new();
-                root.to_string_lossy().hash(&mut s);
-                format!("{:x}", s.finish())
-            };
-            let app_dir = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-                .unwrap_or_else(|| PathBuf::from("."));
-            let memories_dir = app_dir.join(".kilroy_memories");
+            let hash = format!(
+                "{:x}",
+                Sha256::digest(root.to_string_lossy().as_bytes())
+            );
+            let memories_dir = app_data_dir.join("memories");
             memories_dir.join(hash)
         };
         std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;

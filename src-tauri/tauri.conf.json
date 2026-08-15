@@ -57,7 +57,16 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/ollama/**/*"
+      "resources/ollama/**/*",
+      "../smartcoder/kilroy_smartcoder.py",
+      "../smartcoder/smartcoder/__init__.py",
+      "../smartcoder/smartcoder/agents/**/*.py",
+      "../smartcoder/smartcoder/cli/**/*.py",
+      "../smartcoder/smartcoder/controllers/**/*.py",
+      "../smartcoder/smartcoder/infrastructure/**/*.py",
+      "../smartcoder/smartcoder/intelligence/**/*.py",
+      "../smartcoder/smartcoder/legacy/**/*.py",
+      "../smartcoder/smartcoder/runtime/**/*.py"
     ],
     "windows": {
       "webviewInstallMode": {

@@ -310,7 +310,7 @@ if ($SkipSmartcoder) {
     if (-not (Test-Path $smartDir)) {
         Write-Warn "smartcoder/ directory not found -- run from the project root that has the smartcoder/ subfolder."
     } else {
-        $venvDir = Join-Path $smartDir ".venv"
+        $venvDir = Join-Path $ProjectRoot ".venv"
         $reqsPath = Join-Path $ProjectRoot "requirements.txt"
 
         if (-not (Test-Path (Join-Path $venvDir "Scripts\python.exe"))) {
@@ -328,9 +328,16 @@ if ($SkipSmartcoder) {
         $pythonExe = Join-Path $venvDir "Scripts\python.exe"
         if (Test-Path $pythonExe) {
             Write-Info "installing SmartCoder deps from requirements.txt..."
-            & uv pip install -r $reqsPath 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor $script:Muted }
+            & uv pip install --python $pythonExe -r $reqsPath 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor $script:Muted }
             if ($LASTEXITCODE -eq 0) {
                 Write-Ok "SmartCoder deps installed in venv"
+                Write-Info "installing the SmartCoder package and console commands..."
+                & uv pip install --python $pythonExe --no-deps $smartDir 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor $script:Muted }
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Ok "SmartCoder package installed"
+                } else {
+                    Write-Warn "SmartCoder package install exited $LASTEXITCODE."
+                }
             } else {
                 Write-Warn "uv pip install exited $LASTEXITCODE -- check that uv is available and all deps resolve."
             }
@@ -339,17 +346,18 @@ if ($SkipSmartcoder) {
             if (-not $SkipIndex) {
                 $smartcoderCli = Join-Path $venvDir "Scripts\smartcoder.exe"
                 if (Test-Path $smartcoderCli) {
-                    Write-Info "building FAISS index (first build downloads datasets: ~500 MB, then chunk + embed)..."
+                    Write-Info "building the safe NumPy RAG index (first build downloads datasets: ~500 MB, then chunk + embed)..."
                     Write-Info "this can take several minutes. Pass -SkipIndex to defer."
-                    & $smartcoderCli build-index 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor $script:Muted }
+                    $indexDir = Join-Path $smartDir "vector_store"
+                    & $smartcoderCli --index-dir $indexDir build-index 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor $script:Muted }
                     if ($LASTEXITCODE -eq 0) {
-                        Write-Ok "FAISS index built"
+                        Write-Ok "SmartCoder RAG index built"
                     } else {
                         Write-Warn "smartcoder build-index exited $LASTEXITCODE (can be re-run later with: smartcoder build-index)"
                     }
                 } else {
                     Write-Warn "smartcoder CLI not found in venv after install -- build-index step skipped."
-                    Write-Info "when the install works, run: .\kilroy\.venv\Scripts\smartcoder build-index"
+                    Write-Info "when the install works, run: .\.venv\Scripts\smartcoder build-index"
                 }
             } else {
                 Write-Info "FAISS index build skipped via -SkipIndex"
@@ -480,7 +488,7 @@ if ($NoRun) {
     Write-Host "                      " -NoNewline
     Write-Host "(needs cargo-outdated: cargo install cargo-outdated)" -ForegroundColor $script:Muted
     Write-Host "  SmartCoder CLI:     " -NoNewline
-    Write-Host ".\smartcoder\.venv\Scripts\smartcoder --help" -ForegroundColor $script:Amber
+    Write-Host ".\.venv\Scripts\smartcoder --help" -ForegroundColor $script:Amber
     Write-Host ""
     Write-Host "  ⚠ SECURITY: .env contains your Tauri signing key." -ForegroundColor $script:Amber
     Write-Host "    Ensure .env is in .gitignore and NEVER committed." -ForegroundColor $script:Amber

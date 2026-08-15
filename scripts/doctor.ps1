@@ -215,9 +215,9 @@ Check -Name "Python (>= 3.10)" -Probe {
   return $v
 } -FixHint "winget install Python.Python.3.12  -- or install from python.org"
 
-# SmartCoder venv (project .venv)
+# SmartCoder venv (repository-root .venv)
 Check -Name "kilroy venv" -Probe {
-  $venv = Join-Path $PWD "kilroy\.venv"
+  $venv = Join-Path $PWD ".venv"
   if (Test-Path (Join-Path $venv "pyvenv.cfg")) {
     $python = Join-Path $venv "Scripts\python.exe"
     if (Test-Path $python) {
@@ -226,29 +226,29 @@ Check -Name "kilroy venv" -Probe {
     }
     return "pyvenv.cfg found but python.exe missing"
   }
-  throw "kilroy/.venv not found"
-} -FixHint "cd kilroy && python -m venv .venv && .venv\Scripts\activate"
+  throw ".venv not found"
+} -FixHint "uv venv .venv"
 
 # pip check (no broken deps)
 Check -Name "kilroy pip check" -Probe {
-  $venv = Join-Path $PWD "kilroy\.venv"
-  $pip = Join-Path $venv "Scripts\pip.exe"
-  if (-not (Test-Path $pip)) { throw "pip not found in .venv" }
-  $out = & $pip check 2>&1
+  $venv = Join-Path $PWD ".venv"
+  $python = Join-Path $venv "Scripts\python.exe"
+  if (-not (Test-Path $python)) { throw "python not found in .venv" }
+  $out = & uv pip check --python $python 2>&1
   if ($LASTEXITCODE -eq 0) { return "all dependencies satisfied" }
   throw $out
-} -FixHint "cd kilroy && .venv\Scripts\activate"
+} -FixHint "uv pip install --python .venv\Scripts\python.exe -r requirements.txt"
 
-# FAISS index (optional — retrieval works without it, just slower)
-Check -Name "FAISS index (optional)" -AsWarning -Probe {
-  $index = Join-Path $PWD "smartcoder\vector_store\index.faiss"
-  $pkl   = Join-Path $PWD "smartcoder\vector_store\index.pkl"
-  if ((Test-Path $index) -and (Test-Path $pkl)) {
+# Safe NumPy index (optional — project-grounded mode does not require it)
+Check -Name "SmartCoder RAG index (optional)" -AsWarning -Probe {
+  $index = Join-Path $PWD "smartcoder\vector_store\embeddings.npy"
+  $docs  = Join-Path $PWD "smartcoder\vector_store\documents.jsonl"
+  if ((Test-Path $index) -and (Test-Path $docs)) {
     $size = (Get-Item $index).Length
     return "$([math]::Round($size/1KB,1)) KB"
   }
-  throw "vector_store/index.faiss or index.pkl missing (run: smartcoder build-index)"
-} -FixHint "cd kilroy && .venv\Scripts\python -m kilroy_retrieval"
+  throw "safe RAG index missing (optional; run: smartcoder build-index)"
+} -FixHint ".\.venv\Scripts\smartcoder --index-dir smartcoder\vector_store build-index"
 
 # Bundled Ollama (build-time prereq)
 Check -Name "Bundled Ollama (build)" -Probe {
