@@ -422,7 +422,12 @@ async fn run_smartcoder_analysis(
     let argv = launch.argv;
     let workdir = launch.workdir;
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let result = run_smartcoder_ask_blocking(&argv, workdir.as_deref(), &sink);
+        let result = run_smartcoder_ask_blocking(
+            &argv,
+            workdir.as_deref(),
+            &sink,
+            Some(300),
+        );
         let _ = std::fs::remove_file(context_path);
         result
     })
@@ -430,16 +435,17 @@ async fn run_smartcoder_analysis(
     .map_err(|error| format!("Smart Coder worker join failed: {error}"))??;
 
     if result.code.unwrap_or(1) != 0 {
-        let detail = if result.stderr.trim().is_empty() {
-            result.stdout.trim()
-        } else {
-            result.stderr.trim()
+        let stderr = result.stderr.trim();
+        let stdout = result.stdout.trim();
+        let detail = match (stderr.is_empty(), stdout.is_empty()) {
+            (false, false) => format!(
+                "Smart Coder stderr:\n{stderr}\n\nSmart Coder stdout:\n{stdout}"
+            ),
+            (false, true) => format!("Smart Coder stderr:\n{stderr}"),
+            (true, false) => format!("Smart Coder stdout:\n{stdout}"),
+            (true, true) => format!("process exited with code {:?}", result.code),
         };
-        return Err(if detail.is_empty() {
-            format!("process exited with code {:?}", result.code)
-        } else {
-            detail.to_string()
-        });
+        return Err(detail);
     }
     let output = result.stdout.trim();
     if output.is_empty() {

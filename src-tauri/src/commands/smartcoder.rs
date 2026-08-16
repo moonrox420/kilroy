@@ -190,6 +190,7 @@ pub async fn smartcoder_run(
     )?;
 
     let coordinator = app.clone();
+    let timeout_seconds = if subcommand == "ask" { Some(300) } else { None };
     let argv = launch.argv;
     let workdir = launch.workdir;
     let ctx_cleanup = context_path;
@@ -198,7 +199,11 @@ pub async fn smartcoder_run(
         let sink = StreamSink::SmartCoderPanel {
             app: coordinator.clone(),
         };
-        let result = run_smartcoder_ask_blocking(&argv, workdir.as_deref(), &sink);
+        let result =
+            run_smartcoder_ask_blocking(&argv, workdir.as_deref(), &sink, timeout_seconds);
+        if let Err(error) = &result {
+            sink.emit("stderr", error);
+        }
         if let Some(path) = ctx_cleanup {
             let _ = std::fs::remove_file(path);
         }

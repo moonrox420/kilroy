@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import os
 import queue
 import threading
 import traceback
@@ -235,6 +236,13 @@ class CodingAssistant:
         """
         if not task or not task.strip():
             raise ValueError("Task prompt must be a non-empty string.")
+
+        if os.environ.get("SMARTCODER_SUPERVISED") == "1":
+            logger.info(
+                "Executing task under Kilroy supervision (maximum_runtime=%ds)",
+                timeout_seconds,
+            )
+            return self._ask_inline(task, prior_stage_context)
 
         logger.info("Executing task with timeout=%ds", timeout_seconds)
 

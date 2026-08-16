@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 #[derive(Clone, Debug)]
@@ -39,7 +40,7 @@ struct OutputEvent {
 }
 
 impl StreamSink {
-    fn emit(&self, stream: &str, line: &str) {
+    pub(crate) fn emit(&self, stream: &str, line: &str) {
         match self {
             Self::SmartCoderPanel { app } => {
                 let _ = app.emit(
@@ -165,7 +166,7 @@ pub fn smartcoder_deps_ready(project_root: Option<&Path>) -> bool {
     Command::new(&python.executable)
         .arg("-c")
         .arg(
-            "import smolagents; from smartcoder.controllers.maestro import SmartCoderController",
+            "import litellm, smolagents; from smartcoder.controllers.maestro import SmartCoderController",
         )
         .current_dir(repo_root)
         .status()
@@ -262,6 +263,7 @@ pub fn run_smartcoder_ask_blocking(
     argv: &[String],
     workdir: Option<&Path>,
     sink: &StreamSink,
+    timeout_seconds: Option<u64>,
 ) -> Result<SmartCoderProcessResult, String> {
     let (program, arguments) = argv
         .split_first()
@@ -274,6 +276,9 @@ pub fn run_smartcoder_ask_blocking(
         .stdin(Stdio::null());
     if let Some(directory) = workdir {
         command.current_dir(directory);
+    }
+    if timeout_seconds.is_some() {
+        command.env("SMARTCODER_SUPERVISED", "1");
     }
     let mut child = command
         .spawn()
@@ -308,15 +313,52 @@ pub fn run_smartcoder_ask_blocking(
         collected
     });
 
-    let status = child
-        .wait()
-        .map_err(|error| format!("wait for Smart Coder: {error}"))?;
+    let started = Instant::now();
+    let mut timed_out = false;
+    let status = loop {
+        match child
+            .try_wait()
+            .map_err(|error| format!("poll Smart Coder process: {error}"))?
+        {
+            Some(status) => break status,
+            None => {
+                let deadline_reached = timeout_seconds
+                    .map(|seconds| started.elapsed() >= Duration::from_secs(seconds))
+                    .unwrap_or(false);
+                if deadline_reached {
+                    timed_out = true;
+                    let _ = child.kill();
+                    break child
+                        .wait()
+                        .map_err(|error| format!("terminate Smart Coder after timeout: {error}"))?;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+    };
+
     let stdout = stdout_thread
         .join()
         .map_err(|_| "Smart Coder stdout reader panicked.".to_string())?;
     let stderr = stderr_thread
         .join()
         .map_err(|_| "Smart Coder stderr reader panicked.".to_string())?;
+
+    if timed_out {
+        let seconds = timeout_seconds.unwrap_or_default();
+        let mut detail = format!(
+            "Smart Coder exceeded its {seconds}s maximum runtime and was terminated."
+        );
+        if !stderr.trim().is_empty() {
+            detail.push_str("\n\nSmart Coder stderr:\n");
+            detail.push_str(stderr.trim());
+        }
+        if !stdout.trim().is_empty() {
+            detail.push_str("\n\nSmart Coder stdout:\n");
+            detail.push_str(stdout.trim());
+        }
+        return Err(detail);
+    }
 
     Ok(SmartCoderProcessResult {
         code: status.code(),
