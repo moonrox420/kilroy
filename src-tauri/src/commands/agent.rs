@@ -445,6 +445,7 @@ async fn run_smartcoder_analysis(
             (true, false) => format!("Smart Coder stdout:\n{stdout}"),
             (true, true) => format!("process exited with code {:?}", result.code),
         };
+        tracing::error!(error = %detail, "Smart Coder backend process failed");
         return Err(detail);
     }
     let output = result.stdout.trim();

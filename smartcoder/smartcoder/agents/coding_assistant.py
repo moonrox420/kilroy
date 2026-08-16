@@ -92,7 +92,7 @@ class CodingAssistant:
             self.deps.require("smolagents")
 
             if self.config.backend == "ollama":
-                self.deps.require("litellm")
+                self.deps.require("ollama")
             elif self.config.backend == "langchain_ollama":
                 self.deps.require("langchain_ollama", "langchain_core")
 

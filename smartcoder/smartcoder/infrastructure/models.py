@@ -2,7 +2,7 @@
 Model factories — build smolagents-compatible Model instances for each backend.
 
 Extracted from the original kilroy_smartcoder.py's build_model() and the three
-model subclasses (_make_llama_cpp_model, _make_langchain_ollama_model).
+model subclasses (_make_ollama_model, _make_llama_cpp_model, _make_langchain_ollama_model).
 Infrastructure layer only. Knows nothing about agents, tasks, or workflows.
 
 REFACTOR NOTES (see remediation PRD):
@@ -134,6 +134,135 @@ def _make_llama_cpp_model(config: AppConfig):
         n_ctx=config.num_ctx,
         temperature=config.temperature,
         max_tokens=config.max_tokens,
+    )
+
+
+def _make_ollama_model(config: AppConfig):
+    """Build a smolagents Model backed directly by the local Ollama API."""
+    from ollama import Client
+    from smolagents import Model
+
+    try:
+        from smolagents import ChatMessage
+    except ImportError:
+        from smolagents.models import ChatMessage  # type: ignore
+
+    class OllamaModel(Model):
+        def __init__(
+            self,
+            model_name: str,
+            host: str,
+            temperature: float,
+            max_tokens: int,
+            num_ctx: int,
+        ) -> None:
+            super().__init__(model_id=model_name, flatten_messages_as_text=False)
+            self.model_name = model_name
+            self.host = host
+            self.temperature = temperature
+            self.max_tokens = max_tokens
+            self.num_ctx = num_ctx
+            self._client = Client(host=host)
+
+        @staticmethod
+        def _content_as_text(content: Any) -> str:
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                parts: list[str] = []
+                for chunk in content:
+                    if isinstance(chunk, dict):
+                        text = chunk.get("text") or chunk.get("content") or ""
+                    else:
+                        text = (
+                            getattr(chunk, "text", None)
+                            or getattr(chunk, "content", None)
+                            or str(chunk)
+                        )
+                    if text:
+                        parts.append(str(text))
+                return "\n".join(parts)
+            return str(content)
+
+        @classmethod
+        def _normalize_messages(cls, messages: list[Any]) -> list[dict[str, str]]:
+            normalized: list[dict[str, str]] = []
+            for message in messages:
+                if isinstance(message, dict):
+                    role = message.get("role", "user")
+                    content = message.get("content", "")
+                else:
+                    role = getattr(message, "role", "user")
+                    content = getattr(message, "content", "")
+
+                role_name = str(getattr(role, "value", role)).lower().replace("_", "-")
+                if role_name == "tool-call":
+                    role_name = "assistant"
+                elif role_name == "tool-response":
+                    role_name = "user"
+                elif role_name not in {"system", "user", "assistant", "tool"}:
+                    role_name = "user"
+
+                normalized.append(
+                    {
+                        "role": role_name,
+                        "content": cls._content_as_text(content),
+                    }
+                )
+            return normalized
+
+        def generate(
+            self,
+            messages: list[Any],
+            stop_sequences: list[str] | None = None,
+            response_format: dict[str, str] | None = None,
+            tools_to_call_from: list[Any] | None = None,
+            **kwargs: Any,
+        ):
+            if tools_to_call_from:
+                logger.debug(
+                    "Ignoring native tool schemas for CodeAgent; "
+                    "tools execute through its local executor."
+                )
+
+            options: dict[str, Any] = {
+                "temperature": kwargs.get("temperature", self.temperature),
+                "num_ctx": self.num_ctx,
+                "num_predict": kwargs.get("max_tokens", self.max_tokens),
+            }
+            if stop_sequences:
+                options["stop"] = stop_sequences
+
+            ollama_format: str | dict[str, str] | None = None
+            if response_format:
+                ollama_format = (
+                    "json"
+                    if response_format.get("type") == "json_object"
+                    else response_format
+                )
+
+            response = self._client.chat(
+                model=self.model_name,
+                messages=self._normalize_messages(messages),
+                format=ollama_format,
+                options=options,
+            )
+            response_message = getattr(response, "message", None)
+            content = getattr(response_message, "content", None)
+            if content is None and isinstance(response_message, dict):
+                content = response_message.get("content")
+            if not content:
+                raise RuntimeError(
+                    f"Ollama model {self.model_name!r} returned an empty response."
+                )
+            return ChatMessage(role="assistant", content=str(content))
+
+    return OllamaModel(
+        model_name=config.model_name,
+        host=config.ollama_host,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+        num_ctx=config.num_ctx,
     )
 
 
@@ -275,20 +404,13 @@ def build_model(config: AppConfig, deps: DependencyManager):
 
     if config.backend == "ollama":
         constants.warn_if_ollama_defaults_unset()
-        deps.require("litellm")
-        from smolagents import LiteLLMModel
-
+        deps.require("ollama")
         logger.info(
-            "Backend: Ollama via LiteLLM (model=%s, host=%s)",
+            "Backend: direct Ollama client (model=%s, host=%s)",
             config.model_name,
             config.ollama_host,
         )
-        return LiteLLMModel(
-            model_id=f"ollama_chat/{config.model_name}",
-            api_base=config.ollama_host,
-            temperature=config.temperature,
-            num_ctx=config.num_ctx,
-        )
+        return _make_ollama_model(config)
 
     if config.backend == "langchain_ollama":
         constants.warn_if_ollama_defaults_unset()

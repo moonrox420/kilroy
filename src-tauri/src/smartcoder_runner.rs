@@ -166,7 +166,7 @@ pub fn smartcoder_deps_ready(project_root: Option<&Path>) -> bool {
     Command::new(&python.executable)
         .arg("-c")
         .arg(
-            "import litellm, smolagents; from smartcoder.controllers.maestro import SmartCoderController",
+            "import ollama, smolagents; from smartcoder.controllers.maestro import SmartCoderController",
         )
         .current_dir(repo_root)
         .status()
