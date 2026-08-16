@@ -150,7 +150,7 @@ class CodingAssistant:
                 )
 
             agent_verbosity = (
-                -1
+                0
                 if os.environ.get("SMARTCODER_SUPERVISED") == "1"
                 else self.config.verbosity_level
             )
