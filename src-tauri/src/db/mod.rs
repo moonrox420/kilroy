@@ -48,6 +48,18 @@ fn is_kilroy_repo(root: &Path) -> bool {
         .is_file()
 }
 
+fn sha256_hex(input: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let digest = Sha256::digest(input);
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest.iter().copied() {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
+}
+
 impl Memory {
     /// Open `<root>/.kilroy/memory.db`, applying migrations on first use.
     ///
@@ -69,10 +81,7 @@ impl Memory {
             root.join(".kilroy")
         } else {
             // Foreign folder: route to app-data so we don't litter the user's FS.
-            let hash = format!(
-                "{:x}",
-                Sha256::digest(root.to_string_lossy().as_bytes())
-            );
+            let hash = sha256_hex(root.to_string_lossy().as_bytes());
             let memories_dir = app_data_dir.join("memories");
             memories_dir.join(hash)
         };
@@ -134,4 +143,17 @@ fn register_vec_extension() {
         }
         tracing::debug!("sqlite-vec extension registered");
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sha256_hex;
+
+    #[test]
+    fn sha256_hex_encodes_known_digest() {
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 }
