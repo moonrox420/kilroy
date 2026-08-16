@@ -149,12 +149,17 @@ class CodingAssistant:
                     MAX_AGENT_STEPS,
                 )
 
+            agent_verbosity = (
+                -1
+                if os.environ.get("SMARTCODER_SUPERVISED") == "1"
+                else self.config.verbosity_level
+            )
             self._agent = CodeAgent(
                 tools=tools,
                 model=model,
                 additional_authorized_imports=authorized_imports,
                 max_steps=capped_steps,
-                verbosity_level=self.config.verbosity_level,
+                verbosity_level=agent_verbosity,
                 executor_type=sandbox,
                 instructions=instructions,
                 add_base_tools=True,

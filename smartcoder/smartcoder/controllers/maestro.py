@@ -117,6 +117,12 @@ class SmartCoderController:
         if self.config.use_dataset_rag and self.config.datasets:
             self.memory.constraints.append(f"datasets={list(self.config.datasets)}")
 
+        if (
+            self.config.task_type == "analysis"
+            and self.config.task_role == "architect"
+        ):
+            return self._run_targeted_architect_analysis(task)
+
         # === CRITICAL: Task complexity detection for short-circuit ===
         is_trivial = self._is_trivial_task(task)
         if is_trivial:
@@ -176,7 +182,7 @@ class SmartCoderController:
                 WorkflowState.REVIEW,
             ):
                 agent_role = self.workflow.agent_for_state()
-                if agent_role and agent_role != self.config.task_role:
+                if agent_role:
                     prior_ctx = self._build_prior_stage_context(exclude_role=agent_role)
                     result = self._run_with_role_intelligent(
                         task,
@@ -320,6 +326,29 @@ class SmartCoderController:
         )
         self.telemetry.timeline.record("task_complete", "Success")
         return self._build_final_output(agent_output)
+
+    def _run_targeted_architect_analysis(self, task: str) -> str:
+        """Run Kilroy's project analysis as one explicit architect turn."""
+        self.decisions.record(
+            "approach",
+            "Direct architect analysis",
+            rationale="Kilroy requested an explicit project-grounded architect report",
+            confidence=0.9,
+            lock=True,
+        )
+        try:
+            result = self._run_with_role_intelligent(task, "architect")
+        except Exception as exc:
+            self.workflow.fail(str(exc))
+            self.telemetry.timeline.record("task_complete", f"Failed: {exc}")
+            raise
+
+        self._results["architect"] = result.content
+        self.memory.stage_outputs["architect"] = result.content
+        self.workflow.complete("targeted architect analysis")
+        self.telemetry.timeline.record("task_complete", "Success")
+        logger.info("Targeted architect analysis completed")
+        return result.content
 
     def chat(self) -> None:
         """Interactive session — delegate to CodingAssistant (unchanged)."""

@@ -163,6 +163,15 @@ class WorkflowEngine:
         logger.debug("Workflow advance: %s -> %s", entry["from"], entry["to"])
         return self.current_state
 
+    def complete(self, reason: str | None = None) -> WorkflowState:
+        """Mark a deliberately short-circuited workflow as completed."""
+        self.current_index = len(self.path) - 1
+        self._terminal_state = WorkflowState.COMPLETED
+        if reason:
+            self.metadata["completion_reason"] = reason
+        logger.debug("Workflow completed directly: %s", reason or "no reason")
+        return WorkflowState.COMPLETED
+
     def block(self, reason: str) -> WorkflowState:
         self.metadata["blocked_reason"] = reason
         self._terminal_state = WorkflowState.BLOCKED

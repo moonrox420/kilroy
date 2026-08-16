@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 
 from smartcoder.infrastructure.dependencies import (
     DependencyManager,
@@ -202,8 +203,11 @@ def main(argv: list[str] | None = None) -> int:
             task = " ".join(args.prompt)
             controller = SmartCoderController(config, deps)
             result = controller.run(task)
-            print("\n" + "=" * 80)
-            print(result)
+            if os.environ.get("SMARTCODER_SUPERVISED") == "1":
+                print(result)
+            else:
+                print("\n" + "=" * 80)
+                print(result)
             return 0
 
         if args.command == "chat":

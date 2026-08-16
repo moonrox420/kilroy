@@ -66,6 +66,8 @@ def test_normal_workflow_advances_through_states(
     assert result is not None
     # The workflow should have completed (is_complete = True)
     assert controller.workflow.is_complete
+    # The explicitly configured developer stage must not be skipped.
+    assert "developer" in controller._agent_results
     # Telemetry should have recorded the task
     assert controller.telemetry.timeline is not None
 
@@ -105,3 +107,26 @@ def test_reset_clears_state(controller: SmartCoderController) -> None:
     assert not controller.workflow.is_complete
     assert len(controller.memory.stage_outputs) == 0
     assert len(controller._results) == 0
+
+def test_explicit_architect_analysis_bypasses_planner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kilroy's architect request must not enter the generic planner workflow."""
+    mock_assistant = MagicMock()
+    mock_assistant.ask.return_value = "Architecture report"
+    monkeypatch.setattr(
+        "smartcoder.controllers.maestro.CodingAssistant",
+        lambda *_args, **_kwargs: mock_assistant,
+    )
+    controller = SmartCoderController(
+        AppConfig(task_type="analysis", task_role="architect")
+    )
+
+    result = controller.run("Inspect this project and report defects")
+
+    assert result == "Architecture report"
+    assert controller.workflow.is_complete
+    assert set(controller._agent_results) == {"architect"}
+    assert "planner" not in controller.memory.stage_outputs
+    mock_assistant.ask.assert_called_once()
+
