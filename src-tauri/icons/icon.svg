@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Kilroy app icon — source vector.
+
+  Used to regenerate the rasterised tray/app icons (.png, .ico, .icns)
+  via `npm run icons:regen`. The same shape lives in
+  src/components/common/KilroyMark.tsx for in-app rendering, but that
+  one uses currentColor so theme tokens flow through; this standalone
+  asset bakes in the amber #f59e0b for consistent OS-level rendering.
+
+  ViewBox: 0 0 64 64 (matches the React component, so proportions
+  stay identical at every size).
+-->
+<svg
+  width="1024"
+  height="1024"
+  viewBox="0 0 64 64"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <!-- Optional rounded-square background for app-icon use. Comment out
+       for a transparent silhouette suitable for tray icons. -->
+  <rect width="64" height="64" rx="12" fill="#0b0d10" />
+
+  <!-- Wall -->
+  <line
+    x1="3"
+    y1="36"
+    x2="61"
+    y2="36"
+    stroke="#f59e0b"
+    stroke-width="3"
+    stroke-linecap="round"
+  />
+
+  <!-- Head dome -->
+  <path
+    d="M 22 36 C 22 22, 24 12, 32 12 C 40 12, 42 22, 42 36"
+    stroke="#f59e0b"
+    stroke-width="3"
+    stroke-linecap="round"
+    fill="none"
+  />
+
+  <!-- Eyes -->
+  <circle cx="29" cy="22" r="1.8" fill="#f59e0b" />
+  <circle cx="35" cy="22" r="1.8" fill="#f59e0b" />
+
+  <!-- Long pear-shaped nose -->
+  <path
+    d="M 31 24
+       C 29 28, 29 38, 29 44
+       C 29 50, 35 50, 35 44
+       C 35 38, 35 28, 33 24 Z"
+    stroke="#f59e0b"
+    stroke-width="3"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+    fill="none"
+  />
+
+  <!-- Left hand -->
+  <path
+    d="M 6 36
+       Q 8 32 10 36
+       Q 12 32 14 36
+       Q 16 32 18 36
+       Q 20 32 22 36"
+    stroke="#f59e0b"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+
+  <!-- Right hand -->
+  <path
+    d="M 42 36
+       Q 44 32 46 36
+       Q 48 32 50 36
+       Q 52 32 54 36
+       Q 56 32 58 36"
+    stroke="#f59e0b"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+</svg>
