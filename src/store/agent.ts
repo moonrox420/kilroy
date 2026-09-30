@@ -14,6 +14,7 @@ import {
   memory,
   type AgentContext,
   type AgentMode,
+  type CouncilStrategy,
   type StoredMessage,
   type TaskRow,
 } from "@/lib/tauri";
@@ -43,12 +44,16 @@ interface AgentState {
   mode: AgentMode;
   messages: ChatMessage[];
   isThinking: boolean;
+  currentTurnId: number;
+  councilStrategyOverride: CouncilStrategy | null;
 
   setMode: (mode: AgentMode) => Promise<void>;
+  setCouncilStrategyOverride: (strategy: CouncilStrategy | null) => void;
   /** `images` are raw base64 strings (no `data:` URL prefix). Passed
    *  verbatim to Ollama's `/api/chat`. Optional — text-only turns omit
    *  the field. */
-  send: (content: string, images?: string[]) => Promise<void>;
+  send: (content: string, images?: string[], strategyOverride?: CouncilStrategy) => Promise<void>;
+  cancelThinking: () => void;
   clear: () => void;
   loadHistory: (msgs: StoredMessage[]) => void;
   markPlanExecuted: (run_id: string) => void;
@@ -65,6 +70,12 @@ export const useAgent = create<AgentState>((set, get) => ({
   mode: "code_agent",
   messages: [BOOT_MSG],
   isThinking: false,
+  currentTurnId: 0,
+  councilStrategyOverride: null,
+
+  setCouncilStrategyOverride(strategy) {
+    set({ councilStrategyOverride: strategy });
+  },
 
   async setMode(mode) {
     const prev = get().mode;
@@ -78,7 +89,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
   },
 
-  async send(content, images) {
+  async send(content, images, strategyOverride) {
     const trimmed = content.trim();
     // Allow image-only turns ("here, look at this") — only bail if BOTH
     // text and images are empty.
@@ -90,7 +101,12 @@ export const useAgent = create<AgentState>((set, get) => ({
       timestamp: Date.now(),
       attached_images_count: images?.length ?? 0,
     };
-    set((s) => ({ messages: [...s.messages, userMsg], isThinking: true }));
+    const turnId = get().currentTurnId + 1;
+    set((s) => ({
+      messages: [...s.messages, userMsg],
+      isThinking: true,
+      currentTurnId: turnId,
+    }));
 
     try {
       const ws = useWorkspace.getState();
@@ -103,7 +119,9 @@ export const useAgent = create<AgentState>((set, get) => ({
           }
         : undefined;
 
-      const reply = await agent.send(trimmed, images, activeFile);
+      const strategy = strategyOverride ?? get().councilStrategyOverride ?? undefined;
+      const reply = await agent.send(trimmed, images, activeFile, strategy);
+      if (get().currentTurnId !== turnId) return; // Cancelled
       set((s) => ({
         messages: [
           ...s.messages,
@@ -121,6 +139,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         isThinking: false,
       }));
     } catch (err) {
+      if (get().currentTurnId !== turnId) return; // Cancelled
       set((s) => ({
         messages: [
           ...s.messages,
@@ -134,6 +153,23 @@ export const useAgent = create<AgentState>((set, get) => ({
         isThinking: false,
       }));
     }
+  },
+
+  cancelThinking() {
+    if (!get().isThinking) return;
+    set((s) => ({
+      isThinking: false,
+      currentTurnId: s.currentTurnId + 1,
+      messages: [
+        ...s.messages,
+        {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: "Thinking cancelled by user.",
+          timestamp: Date.now(),
+        },
+      ],
+    }));
   },
 
   clear() {

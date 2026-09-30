@@ -14,6 +14,7 @@ import { EmptyState, Loading } from "../MemoryPanel";
 export function DecisionsPanel() {
   const project = useMemory((s) => s.project);
   const openComposer = useMemoryPanel((s) => s.openDecisionComposer);
+  const decisionsRevision = useMemoryPanel((s) => s.decisionsRevision);
   const [decisions, setDecisions] = useState<Decision[] | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
 
@@ -31,7 +32,7 @@ export function DecisionsPanel() {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.id]);
+  }, [project?.id, decisionsRevision]);
 
   if (!project) return <EmptyState title="No project" body="Open a folder first." />;
   if (decisions === null) return <Loading />;

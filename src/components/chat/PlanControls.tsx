@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { usePlan } from "@/store/plan";
 import { plan as planApi, type TaskRow } from "@/lib/tauri";
 import { useAgent } from "@/store/agent";
+import { notify } from "@/store/notifications";
 
 interface Props {
   run_id: string;
@@ -34,6 +35,7 @@ export function PlanControls({ run_id, tasks }: Props) {
       markPlanExecuted(run_id);
     } catch (err) {
       console.error("execute_plan:", err);
+      notify.fromError("Execute plan", err);
     } finally {
       setBusy(false);
     }

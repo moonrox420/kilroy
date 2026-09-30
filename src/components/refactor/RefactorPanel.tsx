@@ -26,16 +26,11 @@ import {
   Play,
   FileCode2,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useRefactor } from "@/store/refactor";
 import { useMemory } from "@/store/memory";
+import { useSettings } from "@/store/settings";
 import { notify } from "@/store/notifications";
 import type {
   RefactorCandidate,
@@ -56,6 +51,10 @@ export function RefactorPanel() {
   const startScan = useRefactor((s) => s.startScan);
   const applyProposal = useRefactor((s) => s.applyProposal);
   const dismissProposal = useRefactor((s) => s.dismissProposal);
+  const strategyOverride = useRefactor((s) => s.strategyOverride);
+  const setStrategyOverride = useRefactor((s) => s.setStrategyOverride);
+  const configuredStrategy = useSettings((s) => s.current?.council_strategy ?? "single_pass");
+  const activeStrategy = strategyOverride ?? configuredStrategy;
   const project = useMemory((s) => s.project);
 
   useEffect(() => {
@@ -73,11 +72,37 @@ export function RefactorPanel() {
               <GitBranch className="h-3.5 w-3.5 text-amber" />
               Background Refactor
             </DialogTitle>
-            <RefactorStatsRow stats={stats} />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setStrategyOverride(
+                    activeStrategy === "single_pass" ? "swarm" : "single_pass"
+                  )
+                }
+                className="flex items-center gap-1.5 rounded border border-line bg-bg-2 px-2 py-0.5 text-[10.5px] text-ink transition-colors hover:border-amber hover:text-amber"
+                title="Click to toggle between fast Single-Pass and 4-Voice Swarm for Refactor analysis"
+              >
+                {activeStrategy === "single_pass" ? (
+                  <>
+                    <span className="text-amber">⚡ Single-Pass (Fast)</span>
+                    <span className="text-ink-ghost">· switch to Swarm</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-amber">🗣️ 4-Voice Swarm</span>
+                    <span className="text-ink-ghost">· switch to Single-Pass</span>
+                  </>
+                )}
+              </button>
+              <RefactorStatsRow stats={stats} />
+            </div>
           </div>
           <DialogDescription>
             {project
-              ? `Scanning ${project.name}. Pick a candidate to run the 4-voice refactor swarm; review proposals below.`
+              ? `Scanning ${project.name}. Pick a candidate to run ${
+                  activeStrategy === "swarm" ? "the 4-voice refactor swarm" : "single-pass refactor analysis"
+                }; review proposals below.`
               : "Open a project folder to scan for refactor opportunities."}
           </DialogDescription>
         </DialogHeader>
@@ -100,10 +125,14 @@ export function RefactorPanel() {
                 <Section
                   title={
                     scanning
-                      ? `🧠 Swarm scanning ${shortPath(scanning)}`
+                      ? `🧠 Analyzing ${shortPath(scanning)}`
                       : "🧠 Last scan"
                   }
-                  subtitle="Four voices analysing the file in parallel. The synthesiser picks the highest-impact / lowest-risk proposal once they all finish."
+                  subtitle={
+                    Object.values(live.voicesDone).some(Boolean)
+                      ? "4-voice refactor swarm evaluating duplication, complexity, error handling, and modernization."
+                      : "Single-pass refactor analysis evaluating duplication, complexity, error handling, and modernization."
+                  }
                 >
                   <RefactorSwarmLive />
                 </Section>
@@ -285,20 +314,23 @@ const VOICE_META: Record<
 function RefactorSwarmLive() {
   const live = useRefactor((s) => s.live);
   const scanning = useRefactor((s) => s.scanning);
+  const hasVoiceOutput = Object.values(live.voices).some(Boolean);
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-        {(Object.keys(VOICE_META) as RefactorVoice[]).map((id) => (
-          <VoiceCard
-            key={id}
-            meta={VOICE_META[id]}
-            content={live.voices[id]}
-            done={live.voicesDone[id]}
-            running={!!scanning}
-          />
-        ))}
-      </div>
+      {hasVoiceOutput && (
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+          {(Object.keys(VOICE_META) as RefactorVoice[]).map((id) => (
+            <VoiceCard
+              key={id}
+              meta={VOICE_META[id]}
+              content={live.voices[id]}
+              done={live.voicesDone[id]}
+              running={!!scanning}
+            />
+          ))}
+        </div>
+      )}
       <SynthCard content={live.synthesis} scanning={!!scanning} />
     </div>
   );
@@ -376,7 +408,7 @@ function SynthCard({
       </div>
       <div className="max-h-52 overflow-y-auto px-2 py-1.5 text-[11.5px] text-ink whitespace-pre-wrap">
         {empty ? (
-          <span className="text-ink-subtle italic">awaiting voices…</span>
+          <span className="text-ink-subtle italic">Analyzing file for refactoring opportunities…</span>
         ) : (
           content
         )}

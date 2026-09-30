@@ -1,16 +1,13 @@
 /**
- * Live-streaming UI for the four-voice Council.
+ * Live-streaming UI for the Council.
  *
- * Rendered inline in the chat history while the four voices + the
- * synthesizer are streaming. Each voice gets its own card with a status
- * dot (·  spinning · ✓) and a live text buffer. The synthesis card
- * sits below the voices and only fills in once all four voices finish
- * — visually mirroring the backend's "fan out then synthesize" flow.
+ * Rendered inline in the chat history while the deliberation + synthesis
+ * are streaming. In single-pass mode, displays a clean deliberation card.
+ * If separate voices are streamed, displays the 4 voice cards in parallel.
  *
  * After the synthesis completes the backend persists a regular agent
- * message with all four voices + synthesis as Markdown, so this card
- * is transient: it disappears when the chat panel resets the store
- * after the message lands.
+ * message, so this card is transient: it disappears when the chat panel
+ * resets the store after the message lands.
  */
 import { Loader2, CircleCheck } from "lucide-react";
 import { useCouncil } from "@/store/council";
@@ -38,36 +35,33 @@ export function CouncilLive() {
   const synthesis = useCouncil((s) => s.synthesis);
   const synthesisDone = useCouncil((s) => s.synthesisDone);
 
+  const hasVoices = Object.keys(voices).length > 0 && Object.values(voices).some(Boolean);
+
   return (
     <div className="flex flex-col gap-3 rounded-md border border-line bg-bg-1 p-3">
       <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-ink-subtle">
         <span>🗣️ Council in session</span>
-        <span className="text-ink-subtle/60">· 4 voices · adversarial debate</span>
+        <span className="text-ink-subtle/60">· Architectural Deliberation &amp; Synthesis</span>
       </div>
 
-      {/* 4 voice cards. On wide layouts they sit 2x2; on narrow chat
-          they stack. Each card maintains its own scrolling area so a
-          chatty voice doesn't push the others off-screen. */}
-      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-        {VOICE_REGISTRY.map((v) => (
-          <VoiceCard
-            key={v.id}
-            spec={v}
-            content={voices[v.id] ?? ""}
-            done={voicesDone[v.id] ?? false}
-          />
-        ))}
-      </div>
+      {hasVoices && (
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+          {VOICE_REGISTRY.map((v) => (
+            <VoiceCard
+              key={v.id}
+              spec={v}
+              content={voices[v.id] ?? ""}
+              done={voicesDone[v.id] ?? false}
+            />
+          ))}
+        </div>
+      )}
 
-      {/* Synthesis only fills in once any of the voices finish, but the
-          backend gates synthesis on ALL voices done. We show the card
-          shell upfront with a "waiting" state so the user understands
-          the structure. */}
       <SynthesisCard
         content={synthesis}
         done={synthesisDone}
-        anyVoiceDone={Object.values(voicesDone).some(Boolean)}
-        label="🧭 Synthesis"
+        anyVoiceDone={hasVoices ? Object.values(voicesDone).some(Boolean) : true}
+        label="🧭 Deliberation & Synthesis"
       />
     </div>
   );
@@ -101,9 +95,6 @@ function VoiceCard({
           )}
         </span>
       </div>
-      {/* Streaming text. Cap height so a chatty voice doesn't dominate
-          — the user can read the full content from the persisted
-          message bubble after the turn completes. */}
       <div className="max-h-44 overflow-y-auto px-2 py-1.5 text-[11.5px] text-ink whitespace-pre-wrap">
         {empty ? (
           <span className="text-ink-subtle italic">…</span>

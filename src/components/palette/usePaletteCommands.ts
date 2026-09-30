@@ -17,6 +17,7 @@ import {
   FileCode2,
   FileText,
   FolderOpen,
+  GitBranch,
   Lightbulb,
   ListChecks,
   PanelLeft,
@@ -34,6 +35,8 @@ import { useMemory } from "@/store/memory";
 import { useMemoryPanel } from "@/store/memoryPanel";
 import { useTerminals } from "@/store/terminals";
 import { useRecents } from "@/store/recents";
+import { useRefactor } from "@/store/refactor";
+import { useDatasets } from "@/store/datasets";
 
 export interface PaletteCommand {
   id: string;
@@ -248,17 +251,60 @@ export function usePaletteCommands(ctx: PaletteContext): PaletteCommand[] {
         run: () => ag.setMode("debug"),
       },
       {
+        id: "agent.new-skill",
+        label: "New Skill…",
+        detail: "Create and persist a reusable LLM skill.",
+        category: "Agent",
+        shortcut: "Ctrl+Shift+K",
+        icon: Sparkles,
+        weight: 53,
+        run: () => memPanel.openSkillCreator(),
+      },
+      {
+        id: "agent.train-custom-model",
+        label: "Train Custom Model from Dataset…",
+        detail: "Inspect training data and compose custom Modelfiles.",
+        category: "Agent",
+        icon: Bot,
+        weight: 54,
+        run: () => useDatasets.getState().openDialog(),
+      },
+      {
         id: "agent.clear-chat",
         label: "Clear Chat",
         category: "Agent",
         icon: Trash2,
-        weight: 53,
+        weight: 55,
         run: () => ag.clear(),
       },
     );
 
+    // ─── Refactor ─────────────────────────────────────────
+    out.push({
+      id: "refactor.open",
+      label: "Refactor Assistant…",
+      detail: "Background scan for safe improvements across duplicates, complexity, errors, and modern idioms.",
+      category: "Refactor",
+      shortcut: "Ctrl+Shift+R",
+      icon: GitBranch,
+      weight: 58,
+      disabled: !mem.project,
+      run: () => useRefactor.getState().openPanel(),
+    });
+
     // ─── Memory ───────────────────────────────────────────
     out.push(
+      {
+        id: "memory.browse-all",
+        label: "Project Memory…",
+        detail: "Open the memory panel with sessions, decisions, and file index.",
+        category: "Memory",
+        shortcut: "Ctrl+Shift+M",
+        icon: Database,
+        weight: 59,
+        disabled: !mem.project,
+        run: () => memPanel.openTab("sessions"),
+      },
       {
         id: "memory.index-project",
         label: mem.indexing ? "Indexing in progress…" : "Index Project",

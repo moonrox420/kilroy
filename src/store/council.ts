@@ -92,6 +92,16 @@ export const useCouncil = create<CouncilState>((set, get) => ({
 
     void council
       .onSynthesis((c) => {
+        const cur = get();
+        if (!cur.active) {
+          set({
+            voices: { ...EMPTY_VOICES },
+            voicesDone: { ...EMPTY_DONE },
+            synthesis: "",
+            synthesisDone: false,
+            active: true,
+          });
+        }
         set((s) => ({ synthesis: s.synthesis + c.delta }));
       })
       .then(scope.add).catch(scope.report);

@@ -1,0 +1,108 @@
+# ==============================================================================
+# Kilroy Coder - Production Modelfile for DeepSeek-Coder-V2-Lite-Instruct (Q8_0)
+# Tailored for the Kilroy Local AI Code Editor & Assistant
+# ==============================================================================
+# Base model reference:
+# 1. HuggingFace repo tag (resolved from local Ollama cache if already pulled):
+FROM hf.co/QuantFactory/DeepSeek-Coder-V2-Lite-Instruct-GGUF:Q8_0
+# 2. Alternatively, direct local blob path:
+# FROM C:\Users\droxa\.ollama\models\blobs\sha256-b4bd95cde217279207f077c5c13017c4b83e367d4d074d2543caa6a65d683192
+
+# ------------------------------------------------------------------------------
+# Prompt Template (Preserves DeepSeek special tokens & FIM fill-in-the-middle)
+# ------------------------------------------------------------------------------
+TEMPLATE """{{- if .Suffix }}<｜fim▁begin｜>{{ .Prompt }}<｜fim▁hole｜>{{ .Suffix }}<｜fim▁end｜>
+{{- else if .Messages }}<｜begin▁of▁sentence｜>
+{{- $system := "" }}
+{{- range $i, $_ := .Messages }}
+{{- if eq .Role "system" }}
+{{- $system = printf "%s %s" $system .Content }}
+{{- else if eq .Role "user" }}
+{{- if $system }}{{ $system }}
+{{- $system = "" }}
+{{ end }}User: {{ .Content }}
+
+{{ if eq (len (slice $.Messages $i)) 1 }}Assistant:
+{{- end }}
+{{- else if eq .Role "assistant" }}Assistant: {{ .Content }}<｜end▁of▁sentence｜>
+{{- end }}
+{{- end }}
+{{- else }}
+{{- if .System }}{{ .System }}
+{{- end }}
+{{- if .Prompt }}User: {{ .Prompt }}
+{{- end }}Assistant:{{ .Response }}
+{{- end }}"""
+
+# ------------------------------------------------------------------------------
+# Stop Tokens
+# ------------------------------------------------------------------------------
+PARAMETER stop "User:"
+PARAMETER stop "Assistant:"
+PARAMETER stop "<｜begin▁of▁sentence｜>"
+PARAMETER stop "<｜end▁of▁sentence｜>"
+PARAMETER stop "<｜fim▁begin｜>"
+PARAMETER stop "<｜fim▁hole｜>"
+PARAMETER stop "<｜fim▁end｜>"
+
+# ------------------------------------------------------------------------------
+# Runtime & Sampling Parameters
+# ------------------------------------------------------------------------------
+# Balanced context window for desktop GPUs (16,384 tokens).
+# Aligned with Kilroy's 16k context window for multi-file context.
+PARAMETER num_ctx 16384
+
+# Maximum tokens to generate per turn (prevents cutoffs during long diffs).
+PARAMETER num_predict 4096
+
+# Low temperature for deterministic, high-accuracy coding and exact diffs.
+PARAMETER temperature 0.2
+
+# Nucleus sampling
+PARAMETER top_p 0.95
+PARAMETER top_k 40
+
+# Mild repetition penalty to avoid loops while allowing repetitive syntax.
+PARAMETER repeat_penalty 1.05
+PARAMETER repeat_last_n 64
+
+# ------------------------------------------------------------------------------
+# System Instructions for Kilroy
+# ------------------------------------------------------------------------------
+SYSTEM """You are Kilroy Coder, an elite Principal Software Architect and Staff Systems Engineer embedded in the Kilroy desktop AI development environment.
+
+Your mandate: Deliver complete, production-ready, verified code. Zero placeholders, zero hand-waving, zero conversational filler.
+
+1. EDITOR-GROUNDED CODE MODIFICATIONS (SEARCH / REPLACE BLOCKS):
+When editing existing code, output precise SEARCH/REPLACE blocks formatted as:
+```{language} path={relative_file_path}
+<<<<<<< SEARCH
+[exact lines from the target file to locate, including 2-4 surrounding lines for uniqueness]
+=======
+[replacement lines to insert]
+>>>>>>> REPLACE
+```
+- SEARCH blocks must match the file content VERBATIM, including indentation, whitespace, and line endings.
+- Only modify lines that require changes; do not rewrite unchanged portions of the file.
+- Multiple blocks in a single response are supported for edits across different sections.
+
+2. NEW FILES & COMPREHENSIVE REWRITES:
+When creating a new file or providing an entire file:
+```{language} path={relative_file_path}
+[complete, compilable, runnable file contents]
+```
+
+3. SHELL COMMANDS:
+When proposing shell commands, specify the shell clearly:
+```powershell
+[PowerShell command]
+```
+or
+```bash
+[Bash command]
+```
+
+4. DEFENSIVE ARCHITECTURAL STANDARDS:
+- STRICT BAN ON PLACEHOLDERS: NEVER use '// TODO', '// implement later', '// ...', '/* ... */', or 'pass'. Every function, branch, and edge-case must be fully implemented.
+- ERROR TOPOLOGY: Never swallow errors. Always handle failure cases, propagate contextual errors, and release resources deterministically.
+- SURGICAL EDITS: Preserve existing styles, conventions, and unrelated behavior. Explain changes concisely before or after the code blocks."""

@@ -110,7 +110,7 @@ pub async fn execute(ctx: &ExecCtx<'_>, plan: &[PlannedTask]) -> ExecResult {
                         temperature: Some(0.3),
                         num_predict: Some(2048),
                         top_p: None,
-                        num_ctx: Some(8192),
+                        num_ctx: Some(16_384),
                     }),
                     |delta| {
                         acc.push_str(delta);

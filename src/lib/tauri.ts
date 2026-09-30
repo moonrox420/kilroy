@@ -355,6 +355,7 @@ export const activity = {
 // ─── Settings ───────────────────────────────────────────────────────────────
 
 export type SandboxDefault = "host" | "windows_sandbox" | "docker";
+export type CouncilStrategy = "single_pass" | "swarm";
 
 export interface SettingsView {
   ollama_url: string;
@@ -367,6 +368,8 @@ export interface SettingsView {
   chunk_window: number;
   chunk_stride: number;
   embedding_dim: number;
+  council_strategy: CouncilStrategy;
+  custom_compiler_command: string | null;
   /** True until the first-run wizard completes. Drives the onboarding
    *  modal. Flipped to false by the wizard's Finish button. */
   first_run: boolean;
@@ -382,6 +385,8 @@ export interface SettingsPatch {
   retrieval_decisions_k?: number;
   chunk_window?: number;
   chunk_stride?: number;
+  council_strategy?: CouncilStrategy;
+  custom_compiler_command?: string | null;
   first_run?: boolean;
 }
 
@@ -437,9 +442,14 @@ export const agent = {
    * non-vision models ignore them. `active_file` grounds the turn on
    * the active Monaco editor tab.
    */
-  send: (message: string, images?: string[], active_file?: ActiveEditorFile) =>
+  send: (
+    message: string,
+    images?: string[],
+    active_file?: ActiveEditorFile,
+    strategy?: CouncilStrategy
+  ) =>
     invoke<AgentMessage>("agent_send_message", {
-      payload: { message, images, active_file },
+      payload: { message, images, active_file, strategy },
     }),
   setMode: (mode: AgentMode) => invoke<void>("agent_set_mode", { mode }),
   status: () => invoke<AgentStatus>("agent_get_status"),
@@ -546,7 +556,11 @@ export const refactor = {
    *  the synthesized proposal (or null if "no proposal" was the
    *  honest outcome). Live progress flows over the `onVoice*` /
    *  `onSynthesis` event channels. */
-  analyzeFile: (input: { file_path: string; scan_run_id?: string }) =>
+  analyzeFile: (input: {
+    file_path: string;
+    scan_run_id?: string;
+    strategy?: CouncilStrategy;
+  }) =>
     invoke<RefactorProposal | null>("refactor_analyze_file", { payload: input }),
   listProposals: (opts?: {
     include_dismissed?: boolean;

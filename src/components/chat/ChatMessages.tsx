@@ -170,7 +170,7 @@ function Bubble({
           user_message: "",
           mode: "autonomous",
           overview: msg.content.split("\n")[0] ?? "",
-          completed: true,
+          completed: !msg.plan_pending,
           success: !msg.tasks.some((t) => t.status === "failed"),
           tasks: msg.tasks.map((t) => ({
             task_id: t.id,
@@ -178,9 +178,11 @@ function Bubble({
             agent: t.agent,
             title: t.title,
             status:
-              t.status === "cancelled" || t.status === "pending"
-                ? "failed"
-                : (t.status as LiveRun["tasks"][number]["status"]),
+              msg.plan_pending && t.status === "pending"
+                ? "pending"
+                : t.status === "cancelled" || t.status === "pending"
+                  ? "failed"
+                  : (t.status as LiveRun["tasks"][number]["status"]),
             output: t.output_preview,
           })),
         }

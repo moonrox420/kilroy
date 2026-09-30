@@ -62,6 +62,7 @@ export function DecisionComposer() {
         rationale: rationale.trim() || undefined,
         related_files: related_files.length ? related_files : undefined,
       });
+      useMemoryPanel.getState().bumpDecisionsRevision();
       reset();
       close();
     } catch (err) {

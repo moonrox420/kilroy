@@ -17,6 +17,14 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CouncilStrategy {
+    #[default]
+    SinglePass,
+    Swarm,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -32,6 +40,8 @@ pub struct Settings {
     /// 768 for nomic-embed-text. Hot pin so the embedding model and the
     /// vec0 table dimension stay aligned.
     pub embedding_dim: usize,
+    pub council_strategy: CouncilStrategy,
+    pub custom_compiler_command: Option<String>,
     /// True until the first-run setup wizard completes. Drives the
     /// onboarding modal that walks the user through Ollama detection,
     /// model pull, and project picker. The wizard flips this to false
@@ -71,6 +81,8 @@ impl Default for Settings {
             chunk_window: 30,
             chunk_stride: 22,
             embedding_dim: 768,
+            council_strategy: CouncilStrategy::SinglePass,
+            custom_compiler_command: None,
             first_run: true,
         }
     }
@@ -181,6 +193,8 @@ pub struct SettingsUpdate {
     pub retrieval_decisions_k: Option<usize>,
     pub chunk_window: Option<usize>,
     pub chunk_stride: Option<usize>,
+    pub council_strategy: Option<CouncilStrategy>,
+    pub custom_compiler_command: Option<String>,
     pub first_run: Option<bool>,
 }
 
@@ -213,6 +227,17 @@ impl SettingsUpdate {
         if let Some(v) = self.chunk_stride {
             s.chunk_stride = v.clamp(4, 200);
         }
+        if let Some(v) = self.council_strategy {
+            s.council_strategy = v;
+        }
+        if let Some(v) = self.custom_compiler_command {
+            let trimmed = v.trim().to_string();
+            s.custom_compiler_command = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            };
+        }
         if let Some(v) = self.first_run {
             s.first_run = v;
         }
@@ -233,6 +258,8 @@ mod tests {
         assert!(!settings.first_run);
         assert!(!settings.chat_model.is_empty());
         assert_eq!(settings.embedding_dim, 768);
+        assert_eq!(settings.council_strategy, CouncilStrategy::SinglePass);
+        assert_eq!(settings.custom_compiler_command, None);
     }
 
     #[test]

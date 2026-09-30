@@ -59,3 +59,9 @@ vite.config.d.ts
 scripts/check_*.ps1
 scripts/cleanup_*.ps1
 %TEMP%/
+
+# Python / pytest caches and archives
+.pytest_cache/
+.ruff_cache/
+.trash_pytest/
+*.zip

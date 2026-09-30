@@ -27,6 +27,7 @@ import { useCouncil } from "@/store/council";
 import { useRefactor } from "@/store/refactor";
 import { usePlatform } from "@/store/platform";
 import { useWorkspace } from "@/store/workspace";
+import { useMemoryPanel } from "@/store/memoryPanel";
 
 const ActivityFeed = lazy(() => import("@/components/activity/ActivityFeed").then((module) => ({ default: module.ActivityFeed })));
 const SettingsDialog = lazy(() => import("@/components/settings/SettingsDialog").then((module) => ({ default: module.SettingsDialog })));
@@ -122,8 +123,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
-  // Ctrl+, toggles Settings, Ctrl+Shift+P toggles the Command Palette,
-  // Ctrl+Shift+D toggles the Diagnostics panel.
+  // Global key bindings: Ctrl+, (Settings), Ctrl+P / Ctrl+Shift+P (Palette),
+  // Ctrl+Shift+D (Diagnostics), Ctrl+Shift+R (Refactor), Ctrl+Shift+M (Memory), Ctrl+Shift+K (New Skill)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const isCtrl = e.ctrlKey || e.metaKey;
@@ -133,9 +134,31 @@ export default function App() {
       } else if (isCtrl && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         usePalette.getState().toggle();
+      } else if (isCtrl && !e.shiftKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        usePalette.getState().show();
       } else if (isCtrl && e.shiftKey && e.key.toLowerCase() === "d") {
         e.preventDefault();
         setDiagnosticsOpen((v) => !v);
+      } else if (isCtrl && e.shiftKey && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        const r = useRefactor.getState();
+        if (r.open) {
+          r.closePanel();
+        } else {
+          r.openPanel();
+        }
+      } else if (isCtrl && e.shiftKey && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        const m = useMemoryPanel.getState();
+        if (m.open) {
+          m.close();
+        } else {
+          m.openTab("sessions");
+        }
+      } else if (isCtrl && e.shiftKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        useMemoryPanel.getState().openSkillCreator();
       }
     };
     window.addEventListener("keydown", onKey);

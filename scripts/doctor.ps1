@@ -107,7 +107,7 @@ Check -Name "Tauri CLI" -Probe {
 Check -Name "MSVC build tools" -Probe {
   $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
   if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
-  $info = & $vswhere -latest -products * -requires Microsoft.VisualCpp.Tools.x86.x64 -property installationVersion 2>$null
+  $info = & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -latest -property installationVersion 2>$null
   if ($info) { return "VS Build Tools $info" } else { throw "MSVC C++ tools not installed" }
 } -FixHint "winget install Microsoft.VisualStudio.2022.BuildTools (then add 'Desktop development with C++' workload)"
 
@@ -199,64 +199,13 @@ Check -Name "Windows Sandbox" -AsWarning -Probe {
   if ($f -and $f.State -eq "Enabled") { return "enabled" } else { throw "not enabled (unavailable on Windows Home; optional elsewhere)" }
 } -FixHint "Pro/Enterprise only: Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All  (needs elevation + reboot)"
 
-# ─── SmartCoder (Python Code Agent) ──────────────────────────────────────
-
-# Python 3.10+ for SmartCoder
-Check -Name "Python (>= 3.10)" -Probe {
-  $v = (python --version 2>$null)
-  if (-not $v) { throw "python not on PATH" }
-  if ($v -match '(\d+)\.(\d+)') {
-    $major = [int]$Matches[1]
-    $minor = [int]$Matches[2]
-    if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 10)) {
-      throw "$v is too old. Need >= 3.10."
-    }
-  }
-  return $v
-} -FixHint "winget install Python.Python.3.12  -- or install from python.org"
-
-# SmartCoder venv (repository-root .venv)
-Check -Name "kilroy venv" -Probe {
-  $venv = Join-Path $PWD ".venv"
-  if (Test-Path (Join-Path $venv "pyvenv.cfg")) {
-    $python = Join-Path $venv "Scripts\python.exe"
-    if (Test-Path $python) {
-      $v = (& $python --version 2>$null)
-      return "$v  ($venv)"
-    }
-    return "pyvenv.cfg found but python.exe missing"
-  }
-  throw ".venv not found"
-} -FixHint "uv venv .venv"
-
-# pip check (no broken deps)
-Check -Name "kilroy pip check" -Probe {
-  $venv = Join-Path $PWD ".venv"
-  $python = Join-Path $venv "Scripts\python.exe"
-  if (-not (Test-Path $python)) { throw "python not found in .venv" }
-  $out = & uv pip check --python $python 2>&1
-  if ($LASTEXITCODE -eq 0) { return "all dependencies satisfied" }
-  throw $out
-} -FixHint "uv pip install --python .venv\Scripts\python.exe -r requirements.txt"
-
-# Safe NumPy index (optional — project-grounded mode does not require it)
-Check -Name "SmartCoder RAG index (optional)" -AsWarning -Probe {
-  $index = Join-Path $PWD "smartcoder\vector_store\embeddings.npy"
-  $docs  = Join-Path $PWD "smartcoder\vector_store\documents.jsonl"
-  if ((Test-Path $index) -and (Test-Path $docs)) {
-    $size = (Get-Item $index).Length
-    return "$([math]::Round($size/1KB,1)) KB"
-  }
-  throw "safe RAG index missing (optional; run: smartcoder build-index)"
-} -FixHint ".\.venv\Scripts\smartcoder --index-dir smartcoder\vector_store build-index"
-
-# Bundled Ollama (build-time prereq)
-Check -Name "Bundled Ollama (build)" -Probe {
+# Bundled Ollama (build-time prereq — warning in dev, fatal in -Strict or release)
+Check -Name "Bundled Ollama (build)" -AsWarning -Probe {
   $p = "src-tauri\resources\ollama\ollama.exe"
   if (Test-Path $p) {
     $size = (Get-Item $p).Length
     return "$([math]::Round($size/1MB,1)) MB"
-  } else { throw "not fetched" }
+  } else { throw "not fetched (run: npm run fetch:ollama before building release)" }
 } -FixHint "npm run fetch:ollama"
 
 # Print report

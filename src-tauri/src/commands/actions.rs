@@ -293,9 +293,13 @@ pub async fn accept_action(
         let memory_for_repair = memory_conn.clone();
         let chat_client = state.chat.clone();
         let session_for_repair = session_id_opt;
+        let custom_cmd = state.settings.read().custom_compiler_command.clone();
 
         tauri::async_runtime::spawn(async move {
-            match crate::actuator::compiler::run_compiler_check(&root_for_check) {
+            match crate::actuator::compiler::run_compiler_check(
+                &root_for_check,
+                custom_cmd.as_deref(),
+            ) {
                 Ok(Some(check_result)) => {
                     let _ = app_handle.emit("agent://compiler/check", check_result.clone());
                     if !check_result.success {
@@ -456,7 +460,8 @@ pub async fn agent_run_compiler_check(
         .map(|m| m.root.clone())
         .ok_or_else(|| "no project open".to_string())?;
 
-    let result = crate::actuator::compiler::run_compiler_check(&root)
+    let custom_cmd = state.settings.read().custom_compiler_command.clone();
+    let result = crate::actuator::compiler::run_compiler_check(&root, custom_cmd.as_deref())
         .map_err(|e| format!("compiler check error: {e:#}"))?;
 
     if let Some(ref res) = result {

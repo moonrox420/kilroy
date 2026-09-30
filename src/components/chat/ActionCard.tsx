@@ -80,6 +80,7 @@ export function ActionCard({ action }: { action: ActionView }) {
       }
     } catch (err) {
       console.error(`accept_action[${action.id}]`, err);
+      notify.fromError("Accept action", err);
     } finally {
       setBusy(false);
     }
@@ -92,6 +93,7 @@ export function ActionCard({ action }: { action: ActionView }) {
       await reject(action.id);
     } catch (error) {
       console.error("Reject action failed:", error);
+      notify.fromError("Reject action", error);
     } finally {
       setBusy(false);
     }

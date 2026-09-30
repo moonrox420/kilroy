@@ -22,7 +22,7 @@
     "icons:regen": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/regen-icons.ps1",
     "fetch:ollama": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-ollama.ps1",
     "doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1",
-    "build:release": "npm run doctor && npm run fetch:ollama && npm run cache:clear && npm run tauri:build",
+    "build:release": "npm run fetch:ollama && npm run doctor && npm run cache:clear && npm run tauri:build",
     "bump": "npm update && npm install && cd src-tauri && cargo update",
     "bump:check": "npm outdated --silent || true && cd src-tauri && cargo outdated --root-deps-only --depth 1 || true",
     "wipe": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/uninstall.ps1",

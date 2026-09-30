@@ -70,6 +70,8 @@ pub struct SendMessagePayload {
     pub images: Option<Vec<String>>,
     #[serde(default)]
     pub active_file: Option<ActiveEditorFile>,
+    #[serde(default)]
+    pub strategy: Option<crate::settings::CouncilStrategy>,
 }
 
 #[tauri::command]
@@ -184,9 +186,13 @@ pub async fn agent_send_message(
             })
         }
         AgentMode::Council => {
+            let strategy = payload
+                .strategy
+                .unwrap_or_else(|| state.settings.read().council_strategy);
             let content = run_council(
                 &app,
                 &state,
+                strategy,
                 &user_msg,
                 &ctx,
                 &recent_msgs,
@@ -507,7 +513,7 @@ async fn run_single_shot(
                 }),
                 num_predict: Some(2048),
                 top_p: None,
-                num_ctx: Some(8192),
+                num_ctx: Some(16_384),
             }),
             |delta| {
                 accumulated.push_str(delta);
@@ -603,33 +609,28 @@ pub struct StreamChunk {
 // dimensions a senior engineer would naturally weigh.
 
 #[derive(Serialize, Clone)]
-struct CouncilVoiceChunk {
-    voice: &'static str,
-    delta: String,
+pub struct CouncilVoiceChunk {
+    pub voice: &'static str,
+    pub delta: String,
 }
 
 #[derive(Serialize, Clone)]
-struct CouncilVoiceDone {
-    voice: &'static str,
-    content: String,
+pub struct CouncilVoiceDone {
+    pub voice: &'static str,
+    pub content: String,
 }
 
 #[derive(Serialize, Clone)]
-struct CouncilSynthesisChunk {
-    delta: String,
+pub struct CouncilSynthesisChunk {
+    pub delta: String,
 }
 
 #[derive(Serialize, Clone)]
-struct CouncilDone {
-    synthesis: String,
+pub struct CouncilDone {
+    pub synthesis: String,
 }
 
-/// The four standing Council voices. Order is deliberate: we render
-/// them in this sequence in the final Markdown, and the UI columns
-/// mirror the same order. Each prompt is ~80 words — enough to set
-/// the voice's priorities and prohibitions without bloating the
-/// system prompt.
-const COUNCIL_VOICES: &[(&str, &str, &str)] = &[
+pub(crate) const COUNCIL_VOICES: &[(&str, &str, &str)] = &[
     (
         "velocity",
         "⚡ Velocity",
@@ -674,7 +675,7 @@ const COUNCIL_VOICES: &[(&str, &str, &str)] = &[
     ),
 ];
 
-const COUNCIL_SYNTHESIZER: &str =
+pub(crate) const COUNCIL_SYNTHESIZER: &str =
     "You are the council synthesizer. You've just received four perspectives \
      on the same question — Velocity, Maintainability, Security, Correctness. \
      Output, in this exact structure:\n\n\
@@ -690,37 +691,25 @@ const COUNCIL_SYNTHESIZER: &str =
      with a one-sentence test for whether the recommended path actually \
      worked. Stay under 350 words total.";
 
-async fn run_council(
-    app: &AppHandle,
-    state: &State<'_, AppState>,
-    user_msg: &str,
-    ctx: &AgentContext,
-    recent_msgs: &[messages::Message],
-    project_overview: &str,
-    user_images: Option<Vec<String>>,
-) -> String {
-    run_swarm(
-        app,
-        state,
-        COUNCIL_VOICES,
-        COUNCIL_SYNTHESIZER,
-        "🧭 Synthesis",
-        user_msg,
-        ctx,
-        recent_msgs,
-        project_overview,
-        user_images,
-    )
-    .await
-}
+const COUNCIL_SINGLE_PASS_SYSTEM: &str =
+    "You are Kilroy's Architectural Council. You evaluate complex technical decisions, \
+     designs, and questions by rigorously analyzing four essential perspectives:\n\
+     - ⚡ Velocity: Minimal-viable path, rapid shipping, avoiding speculative over-engineering\n\
+     - 🔧 Maintainability: Clear abstractions, readability for future maintainers, decoupling\n\
+     - 🛡️ Security: Threat modeling, input validation, principle of least privilege, data exposure\n\
+     - 🎯 Correctness: Edge cases, invariants, concurrency/race safety, failure recovery\n\n\
+     Deliver a clear, decisive, high-signal evaluation using this exact structure:\n\n\
+     ## Key Perspectives\n\
+     - **Velocity**: The fastest practical path forward.\n\
+     - **Maintainability**: What must be kept clean so future edits do not degrade.\n\
+     - **Security**: Specific risks and guardrails required.\n\
+     - **Correctness**: Crucial edge cases, invariants, and how to verify them.\n\n\
+     ## Critical Trade-Offs\n\
+     Identify the primary tensions (e.g. speed vs. completeness, complexity vs. flexibility).\n\n\
+     ## Recommended Path\n\
+     Give a single, concrete, opinionated recommendation. State clearly which trade-offs you accept \
+     and the exact verification step to confirm success.";
 
-/// Public-to-the-crate swarm driver. Other modules (commands::refactor)
-/// can build their own swarms by passing their voices, synthesizer, and
-/// event prefix. The `event_prefix` discriminates which frontend surface
-/// the live progress events go to — Council/Debug both share
-/// `"agent://council"` (chat panel CouncilLive view), Refactor uses
-/// `"agent://refactor"` (Refactor panel view), so background scans
-/// don't visually contaminate active chat turns.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn swarm_with_context(
     app: &AppHandle,
@@ -733,8 +722,6 @@ pub(crate) async fn swarm_with_context(
     user_input: &str,
     user_images: Option<Vec<String>>,
 ) -> String {
-    // Channel names derived from the prefix. Building once and cloning
-    // would also work but a String concat per call is negligible.
     let voice_ch = format!("{}/voice", event_prefix);
     let voice_done_ch = format!("{}/voice_done", event_prefix);
     let synthesis_ch = format!("{}/synthesis", event_prefix);
@@ -829,6 +816,7 @@ pub(crate) async fn swarm_with_context(
             },
         )
         .await;
+
     let _ = app.emit(
         &done_ch,
         CouncilDone {
@@ -848,83 +836,6 @@ pub(crate) async fn swarm_with_context(
     full.push_str(&format!("---\n\n## {}\n\n", synthesis_label));
     full.push_str(synthesis.trim());
     full
-}
-
-/// Chat-aware swarm driver. Builds shared_context from the chat session
-/// (project, retrieved chunks, decisions, recent history) and forwards
-/// to `swarm_with_context` on the Council event channels. Used by
-/// Council mode in agent_send_message.
-#[allow(clippy::too_many_arguments)]
-async fn run_swarm(
-    app: &AppHandle,
-    state: &State<'_, AppState>,
-    voices: &'static [(&'static str, &'static str, &'static str)],
-    synthesizer_system: &'static str,
-    synthesis_label: &'static str,
-    user_msg: &str,
-    ctx: &AgentContext,
-    recent_msgs: &[messages::Message],
-    project_overview: &str,
-    user_images: Option<Vec<String>>,
-) -> String {
-    let chat = state.chat.clone();
-    let shared_context = build_council_shared_context(user_msg, ctx, recent_msgs, project_overview);
-    swarm_with_context(
-        app,
-        &chat,
-        voices,
-        synthesizer_system,
-        synthesis_label,
-        "agent://council",
-        &shared_context,
-        user_msg,
-        user_images,
-    )
-    .await
-}
-
-fn build_council_shared_context(
-    user_msg: &str,
-    ctx: &AgentContext,
-    recent_msgs: &[messages::Message],
-    project_overview: &str,
-) -> String {
-    let mut s = String::new();
-    if !project_overview.is_empty() {
-        s.push_str("# Active project\n");
-        s.push_str(project_overview);
-        s.push_str("\n\n");
-    }
-    if !ctx.chunks.is_empty() {
-        s.push_str("# Retrieved code\n");
-        for c in &ctx.chunks {
-            s.push_str(&format!(
-                "\n## {}:{}-{}\n```\n{}\n```\n",
-                c.file_path,
-                c.start_line,
-                c.end_line,
-                truncate(&c.content, 800),
-            ));
-        }
-        s.push('\n');
-    }
-    if !ctx.decisions.is_empty() {
-        s.push_str("# Prior decisions\n");
-        for d in &ctx.decisions {
-            s.push_str(&format!("- {} — {}\n", d.title, d.summary));
-        }
-        s.push('\n');
-    }
-    if !recent_msgs.is_empty() {
-        s.push_str("# Recent conversation\n");
-        for m in recent_msgs.iter().rev().take(6).rev() {
-            s.push_str(&format!("**{}:** {}\n", m.role, truncate(&m.content, 400)));
-        }
-        s.push('\n');
-    }
-    s.push_str("# Current user question\n");
-    s.push_str(user_msg);
-    s
 }
 
 fn build_council_voice_messages(
@@ -969,6 +880,153 @@ fn format_synth_user_prompt(
         s.push_str(&format!("## {}\n{}\n\n", label, content.trim()));
     }
     s.push_str("\nSynthesize per the structure in your system prompt. Be opinionated.");
+    s
+}
+
+async fn run_council_single_pass(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    user_msg: &str,
+    ctx: &AgentContext,
+    recent_msgs: &[messages::Message],
+    project_overview: &str,
+    user_images: Option<Vec<String>>,
+) -> String {
+    let chat = state.chat.clone();
+    let shared_context = build_council_shared_context(user_msg, ctx, recent_msgs, project_overview);
+    let mut msgs = vec![LlmMessage::text("system", COUNCIL_SINGLE_PASS_SYSTEM)];
+    if !shared_context.is_empty() {
+        msgs.push(LlmMessage::text("system", shared_context));
+    }
+    msgs.push(LlmMessage {
+        role: "user".into(),
+        content: user_msg.to_string(),
+        images: user_images,
+    });
+
+    let app_for_stream = app.clone();
+    let mut accumulated = String::new();
+    let res = chat
+        .chat_stream(
+            &msgs,
+            Some(ChatOptions {
+                temperature: Some(0.3),
+                num_predict: Some(1500),
+                top_p: None,
+                num_ctx: Some(16_384),
+            }),
+            |delta| {
+                accumulated.push_str(delta);
+                let _ = app_for_stream.emit(
+                    "agent://council/synthesis",
+                    CouncilSynthesisChunk {
+                        delta: delta.to_string(),
+                    },
+                );
+            },
+        )
+        .await;
+
+    if let Err(e) = res {
+        tracing::warn!("council analysis failed: {:#}", e);
+        accumulated.push_str(&format!("\n\n_(Council analysis error: {})_", e));
+    }
+
+    let _ = app.emit(
+        "agent://council/done",
+        CouncilDone {
+            synthesis: accumulated.clone(),
+        },
+    );
+
+    accumulated
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_council(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    strategy: crate::settings::CouncilStrategy,
+    user_msg: &str,
+    ctx: &AgentContext,
+    recent_msgs: &[messages::Message],
+    project_overview: &str,
+    user_images: Option<Vec<String>>,
+) -> String {
+    match strategy {
+        crate::settings::CouncilStrategy::SinglePass => {
+            run_council_single_pass(
+                app,
+                state,
+                user_msg,
+                ctx,
+                recent_msgs,
+                project_overview,
+                user_images,
+            )
+            .await
+        }
+        crate::settings::CouncilStrategy::Swarm => {
+            let chat = state.chat.clone();
+            let shared_context =
+                build_council_shared_context(user_msg, ctx, recent_msgs, project_overview);
+            swarm_with_context(
+                app,
+                &chat,
+                COUNCIL_VOICES,
+                COUNCIL_SYNTHESIZER,
+                "🧭 Synthesis",
+                "agent://council",
+                &shared_context,
+                user_msg,
+                user_images,
+            )
+            .await
+        }
+    }
+}
+
+fn build_council_shared_context(
+    user_msg: &str,
+    ctx: &AgentContext,
+    recent_msgs: &[messages::Message],
+    project_overview: &str,
+) -> String {
+    let mut s = String::new();
+    if !project_overview.is_empty() {
+        s.push_str("# Active project\n");
+        s.push_str(project_overview);
+        s.push_str("\n\n");
+    }
+    if !ctx.chunks.is_empty() {
+        s.push_str("# Retrieved code\n");
+        for c in &ctx.chunks {
+            s.push_str(&format!(
+                "\n## {}:{}-{}\n```\n{}\n```\n",
+                c.file_path,
+                c.start_line,
+                c.end_line,
+                truncate(&c.content, 800),
+            ));
+        }
+        s.push('\n');
+    }
+    if !ctx.decisions.is_empty() {
+        s.push_str("# Prior decisions\n");
+        for d in &ctx.decisions {
+            s.push_str(&format!("- {} — {}\n", d.title, d.summary));
+        }
+        s.push('\n');
+    }
+    if !recent_msgs.is_empty() {
+        s.push_str("# Recent conversation\n");
+        for m in recent_msgs.iter().rev().take(6).rev() {
+            s.push_str(&format!("**{}:** {}\n", m.role, truncate(&m.content, 400)));
+        }
+        s.push('\n');
+    }
+    s.push_str("# Current user question\n");
+    s.push_str(user_msg);
     s
 }
 
@@ -1138,13 +1196,23 @@ fn is_explain_query(msg: &str) -> bool {
         "how does",
         "how do ",
         "how is ",
-        "explain ",
-        "describe ",
+        "explain",
+        "describe",
         "tell me about",
         "tell me what",
         "purpose of",
         "who is ",
         "why does",
+        "break down",
+        "breakdown",
+        "overview",
+        "summarize",
+        "summary",
+        "walk me through",
+        "orient me",
+        "what this project",
+        "what the folder",
+        "what this folder",
     ];
     EXPLAIN.iter().any(|p| t.contains(p)) || (t.ends_with('?') && t.len() < 200)
 }
@@ -1236,13 +1304,23 @@ fn build_chat_messages(
     }
 
     let mut out = vec![LlmMessage::text("system", system)];
-    for m in recent_msgs {
+    let history_slice = if recent_msgs.len() > 8 {
+        &recent_msgs[recent_msgs.len() - 8..]
+    } else {
+        recent_msgs
+    };
+    for m in history_slice {
         let role = match m.role.as_str() {
             "user" => "user",
             "agent" => "assistant",
             _ => continue,
         };
-        out.push(LlmMessage::text(role, m.content.clone()));
+        let bounded_content = if m.content.len() > 2500 {
+            format!("{}… [truncated]", &m.content[..2500])
+        } else {
+            m.content.clone()
+        };
+        out.push(LlmMessage::text(role, bounded_content));
     }
     // Final user turn — attach any images so vision-capable models
     // (LLaVA, bakllava, llava-phi3, llama3.2-vision, qwen2-vl, etc.)

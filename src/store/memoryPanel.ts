@@ -16,6 +16,7 @@ interface MemoryPanelState {
    *  Memory panel itself so users can launch it from anywhere (palette,
    *  menu, future agent-suggested-skill flow). */
   skillCreatorOpen: boolean;
+  decisionsRevision: number;
   openTab: (tab: MemoryTab) => void;
   close: () => void;
   setTab: (tab: MemoryTab) => void;
@@ -23,6 +24,7 @@ interface MemoryPanelState {
   closeDecisionComposer: () => void;
   openSkillCreator: () => void;
   closeSkillCreator: () => void;
+  bumpDecisionsRevision: () => void;
 }
 
 export const useMemoryPanel = create<MemoryPanelState>((set) => ({
@@ -30,6 +32,7 @@ export const useMemoryPanel = create<MemoryPanelState>((set) => ({
   tab: "sessions",
   decisionComposerOpen: false,
   skillCreatorOpen: false,
+  decisionsRevision: 0,
   openTab: (tab) => set({ open: true, tab }),
   close: () => set({ open: false }),
   setTab: (tab) => set({ tab }),
@@ -37,4 +40,5 @@ export const useMemoryPanel = create<MemoryPanelState>((set) => ({
   closeDecisionComposer: () => set({ decisionComposerOpen: false }),
   openSkillCreator: () => set({ skillCreatorOpen: true }),
   closeSkillCreator: () => set({ skillCreatorOpen: false }),
+  bumpDecisionsRevision: () => set((s) => ({ decisionsRevision: s.decisionsRevision + 1 })),
 }));

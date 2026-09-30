@@ -46,7 +46,7 @@ impl ProjectToolchain {
 
 /// Detect the primary toolchain for the project by inspecting marker files.
 pub fn detect_toolchain(root: &Path) -> Option<ProjectToolchain> {
-    if root.join("Cargo.toml").is_file() {
+    if root.join("Cargo.toml").is_file() || root.join("src-tauri/Cargo.toml").is_file() {
         Some(ProjectToolchain::Rust)
     } else if root.join("tsconfig.json").is_file() || root.join("package.json").is_file() {
         Some(ProjectToolchain::TypeScript)
@@ -59,75 +59,138 @@ pub fn detect_toolchain(root: &Path) -> Option<ProjectToolchain> {
     }
 }
 
-/// Run the compiler or linter check for the given project root.
-pub fn run_compiler_check(root: &Path) -> Result<Option<CompilerCheckResult>> {
-    let toolchain = match detect_toolchain(root) {
-        Some(t) => t,
-        None => return Ok(None),
-    };
-
+/// Run the compiler or linter check for the given project root, optionally
+/// executing a user-configured custom verification command.
+pub fn run_compiler_check(
+    root: &Path,
+    custom_command: Option<&str>,
+) -> Result<Option<CompilerCheckResult>> {
     let start = Instant::now();
 
-    #[cfg(windows)]
-    let (program, args, command_str) = match toolchain {
-        ProjectToolchain::Rust => (
-            "cargo".to_string(),
-            vec!["check".to_string(), "--message-format=short".to_string()],
-            "cargo check --message-format=short".to_string(),
-        ),
-        ProjectToolchain::TypeScript => {
-            let cmd = if root.join("tsconfig.json").is_file() {
-                "npx.cmd --no-install tsc --noEmit"
-            } else {
-                "npm.cmd test -- --watchAll=false"
-            };
+    let (program, args, command_str, toolchain_name) = if let Some(cmd_str) =
+        custom_command.map(str::trim).filter(|s| !s.is_empty())
+    {
+        #[cfg(windows)]
+        {
             (
                 "cmd.exe".to_string(),
-                vec!["/C".to_string(), cmd.to_string()],
-                cmd.to_string(),
+                vec!["/C".to_string(), cmd_str.to_string()],
+                cmd_str.to_string(),
+                "custom".to_string(),
             )
         }
-        ProjectToolchain::Go => (
-            "go".to_string(),
-            vec!["vet".to_string(), "./...".to_string()],
-            "go vet ./...".to_string(),
-        ),
-        ProjectToolchain::Python => (
-            "cmd.exe".to_string(),
-            vec!["/C".to_string(), "ruff check .".to_string()],
-            "ruff check .".to_string(),
-        ),
-    };
-
-    #[cfg(not(windows))]
-    let (program, args, command_str) = match toolchain {
-        ProjectToolchain::Rust => (
-            "cargo".to_string(),
-            vec!["check".to_string(), "--message-format=short".to_string()],
-            "cargo check --message-format=short".to_string(),
-        ),
-        ProjectToolchain::TypeScript => {
-            let cmd = if root.join("tsconfig.json").is_file() {
-                "npx --no-install tsc --noEmit"
-            } else {
-                "npm test -- --watchAll=false"
-            };
+        #[cfg(not(windows))]
+        {
             (
                 "sh".to_string(),
-                vec!["-c".to_string(), cmd.to_string()],
-                cmd.to_string(),
+                vec!["-c".to_string(), cmd_str.to_string()],
+                cmd_str.to_string(),
+                "custom".to_string(),
             )
         }
-        ProjectToolchain::Go => (
-            "go".to_string(),
-            vec!["vet".to_string(), "./...".to_string()],
-            "go vet ./...".to_string(),
-        ),
-        ProjectToolchain::Python => (
-            "sh".to_string(),
-            vec!["-c".to_string(), "ruff check .".to_string()],
-            "ruff check .".to_string(),
-        ),
+    } else {
+        let toolchain = match detect_toolchain(root) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        #[cfg(windows)]
+        let (prog, a, c_str) = match toolchain {
+            ProjectToolchain::Rust => {
+                if !root.join("Cargo.toml").is_file() && root.join("src-tauri/Cargo.toml").is_file()
+                {
+                    (
+                        "cargo".to_string(),
+                        vec![
+                            "check".to_string(),
+                            "--manifest-path".to_string(),
+                            "src-tauri/Cargo.toml".to_string(),
+                            "--message-format=short".to_string(),
+                        ],
+                        "cargo check --manifest-path src-tauri/Cargo.toml --message-format=short"
+                            .to_string(),
+                    )
+                } else {
+                    (
+                        "cargo".to_string(),
+                        vec!["check".to_string(), "--message-format=short".to_string()],
+                        "cargo check --message-format=short".to_string(),
+                    )
+                }
+            }
+            ProjectToolchain::TypeScript => {
+                let cmd = if root.join("tsconfig.json").is_file() {
+                    "npx.cmd --no-install tsc --noEmit"
+                } else {
+                    "npm.cmd test -- --watchAll=false"
+                };
+                (
+                    "cmd.exe".to_string(),
+                    vec!["/C".to_string(), cmd.to_string()],
+                    cmd.to_string(),
+                )
+            }
+            ProjectToolchain::Go => (
+                "go".to_string(),
+                vec!["vet".to_string(), "./...".to_string()],
+                "go vet ./...".to_string(),
+            ),
+            ProjectToolchain::Python => (
+                "cmd.exe".to_string(),
+                vec!["/C".to_string(), "ruff check .".to_string()],
+                "ruff check .".to_string(),
+            ),
+        };
+
+        #[cfg(not(windows))]
+        let (prog, a, c_str) = match toolchain {
+            ProjectToolchain::Rust => {
+                if !root.join("Cargo.toml").is_file() && root.join("src-tauri/Cargo.toml").is_file()
+                {
+                    (
+                        "cargo".to_string(),
+                        vec![
+                            "check".to_string(),
+                            "--manifest-path".to_string(),
+                            "src-tauri/Cargo.toml".to_string(),
+                            "--message-format=short".to_string(),
+                        ],
+                        "cargo check --manifest-path src-tauri/Cargo.toml --message-format=short"
+                            .to_string(),
+                    )
+                } else {
+                    (
+                        "cargo".to_string(),
+                        vec!["check".to_string(), "--message-format=short".to_string()],
+                        "cargo check --message-format=short".to_string(),
+                    )
+                }
+            }
+            ProjectToolchain::TypeScript => {
+                let cmd = if root.join("tsconfig.json").is_file() {
+                    "npx --no-install tsc --noEmit"
+                } else {
+                    "npm test -- --watchAll=false"
+                };
+                (
+                    "sh".to_string(),
+                    vec!["-c".to_string(), cmd.to_string()],
+                    cmd.to_string(),
+                )
+            }
+            ProjectToolchain::Go => (
+                "go".to_string(),
+                vec!["vet".to_string(), "./...".to_string()],
+                "go vet ./...".to_string(),
+            ),
+            ProjectToolchain::Python => (
+                "sh".to_string(),
+                vec!["-c".to_string(), "ruff check .".to_string()],
+                "ruff check .".to_string(),
+            ),
+        };
+
+        (prog, a, c_str, toolchain.as_str().to_string())
     };
 
     let mut cmd = Command::new(&program);
@@ -183,7 +246,7 @@ pub fn run_compiler_check(root: &Path) -> Result<Option<CompilerCheckResult>> {
 
     Ok(Some(CompilerCheckResult {
         success,
-        toolchain: toolchain.as_str().to_string(),
+        toolchain: toolchain_name,
         command: command_str,
         stdout,
         stderr,
@@ -231,6 +294,28 @@ mod tests {
         let dir = temp_test_dir();
         std::fs::write(dir.join("tsconfig.json"), "{}").unwrap();
         assert_eq!(detect_toolchain(&dir), Some(ProjectToolchain::TypeScript));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detects_nested_tauri_rust_toolchain() {
+        let dir = temp_test_dir();
+        let tauri_dir = dir.join("src-tauri");
+        std::fs::create_dir_all(&tauri_dir).unwrap();
+        std::fs::write(tauri_dir.join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+        assert_eq!(detect_toolchain(&dir), Some(ProjectToolchain::Rust));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn custom_command_executes_successfully() {
+        let dir = temp_test_dir();
+        let res = run_compiler_check(&dir, Some("echo custom_gate_ok")).unwrap();
+        assert!(res.is_some());
+        let check = res.unwrap();
+        assert!(check.success);
+        assert_eq!(check.toolchain, "custom");
+        assert!(check.stdout.contains("custom_gate_ok"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

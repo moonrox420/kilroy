@@ -184,6 +184,65 @@ export function SettingsDialog({ open, onClose }: Props) {
                   onChange={(v) => set("embedding_model", v)}
                 />
               </Section>
+
+              <Section
+                title="Deliberation strategy (Council & Refactor)"
+                subtitle="Controls whether the Council and Refactor engines use a fast single-pass prompt or a 4-voice adversarial swarm."
+              >
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => set("council_strategy", "single_pass")}
+                    className={cn(
+                      "flex flex-col gap-1 rounded border p-2.5 text-left transition-colors",
+                      (draft.council_strategy ?? "single_pass") === "single_pass"
+                        ? "border-amber bg-amber/10 text-ink"
+                        : "border-line bg-bg-2 text-ink-subtle hover:border-ink-subtle"
+                    )}
+                  >
+                    <span className="text-[12px] font-semibold text-ink">⚡ Single-Pass (Fast)</span>
+                    <span className="text-[11px] leading-relaxed text-ink-subtle">
+                      Consolidated prompt evaluating all four perspectives in a single fast stream.
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => set("council_strategy", "swarm")}
+                    className={cn(
+                      "flex flex-col gap-1 rounded border p-2.5 text-left transition-colors",
+                      draft.council_strategy === "swarm"
+                        ? "border-amber bg-amber/10 text-ink"
+                        : "border-line bg-bg-2 text-ink-subtle hover:border-ink-subtle"
+                    )}
+                  >
+                    <span className="text-[12px] font-semibold text-ink">🗣️ 4-Voice Swarm (Deliberate)</span>
+                    <span className="text-[11px] leading-relaxed text-ink-subtle">
+                      Spawns four concurrent perspectives followed by synthesis. Deep deliberation for high-stakes decisions.
+                    </span>
+                  </button>
+                </div>
+              </Section>
+
+              <Section
+                title="Post-approval compiler gate"
+                subtitle="Verification command run automatically when accepted code changes land on disk."
+              >
+                <Field
+                  label="Custom verification command"
+                  hint="Leave blank to auto-detect your project's toolchain (cargo check, npx tsc, etc.)."
+                >
+                  <Input
+                    value={draft.custom_compiler_command ?? ""}
+                    onChange={(e) =>
+                      set(
+                        "custom_compiler_command",
+                        e.target.value.trim() === "" ? null : e.target.value
+                      )
+                    }
+                    placeholder="e.g. npm run check, cargo test, ruff check ."
+                  />
+                </Field>
+              </Section>
             </TabsContent>
 
             <TabsContent value="sandbox" className="overflow-y-auto p-4">

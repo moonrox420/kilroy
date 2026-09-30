@@ -200,7 +200,7 @@ export function MenuBar({
       </Menu>
 
       <Menu label="Go">
-        <DropdownMenuItem className={ITEM} disabled>Go to File…<DropdownMenuShortcut>Ctrl+P</DropdownMenuShortcut></DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => usePalette.getState().show()} className={ITEM}>Go to File…<DropdownMenuShortcut>Ctrl+P</DropdownMenuShortcut></DropdownMenuItem>
         <DropdownMenuItem className={ITEM} disabled>Go to Symbol…<DropdownMenuShortcut>Ctrl+Shift+O</DropdownMenuShortcut></DropdownMenuItem>
       </Menu>
 

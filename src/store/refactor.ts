@@ -18,8 +18,10 @@
 import { create } from "zustand";
 import { createListenerScope } from "@/lib/listenerScope";
 import { notify } from "./notifications";
+import { useActions } from "./actions";
 import {
   refactor,
+  type CouncilStrategy,
   type RefactorCandidate,
   type RefactorProposal,
   type RefactorScanStats,
@@ -58,13 +60,15 @@ interface RefactorState {
   /** File path currently being scanned, or null when idle. */
   scanning: string | null;
   live: LiveVoiceState;
+  strategyOverride: CouncilStrategy | null;
 
+  setStrategyOverride: (strategy: CouncilStrategy | null) => void;
   openPanel: () => void;
   closePanel: () => void;
   refreshAll: () => Promise<void>;
   refreshProposals: () => Promise<void>;
   refreshCandidates: () => Promise<void>;
-  startScan: (filePath: string) => Promise<void>;
+  startScan: (filePath: string, strategy?: CouncilStrategy) => Promise<void>;
   applyProposal: (id: number) => Promise<number | null>;
   dismissProposal: (id: number) => Promise<void>;
   initListeners: () => () => void;
@@ -78,6 +82,9 @@ export const useRefactor = create<RefactorState>((set, get) => ({
   stats: null,
   scanning: null,
   live: { ...EMPTY_LIVE },
+  strategyOverride: null,
+
+  setStrategyOverride: (strategy) => set({ strategyOverride: strategy }),
 
   openPanel: () => {
     set({ open: true });
@@ -115,14 +122,15 @@ export const useRefactor = create<RefactorState>((set, get) => ({
     }
   },
 
-  async startScan(filePath) {
+  async startScan(filePath, strategy) {
     if (get().scanning) return; // one at a time for now
     set({
       scanning: filePath,
       live: { ...EMPTY_LIVE, filePath },
     });
     try {
-      await refactor.analyzeFile({ file_path: filePath });
+      const resolvedStrategy = strategy ?? get().strategyOverride ?? undefined;
+      await refactor.analyzeFile({ file_path: filePath, strategy: resolvedStrategy });
       // Listener will refresh proposals on scan_done.
     } catch (err) {
       console.error("refactor.analyzeFile:", err);
@@ -134,6 +142,7 @@ export const useRefactor = create<RefactorState>((set, get) => ({
     try {
       const actionId = await refactor.apply(id);
       await get().refreshProposals();
+      await useActions.getState().loadForTask(0);
       return actionId;
     } catch (err) {
       console.error("refactor.apply:", err);

@@ -31,7 +31,6 @@
 //! resource gating so an unattended scan doesn't peg the user's GPU
 //! while they're trying to compile.
 
-use crate::commands::agent::swarm_with_context;
 use crate::state::AppState;
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
@@ -39,37 +38,26 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, State};
 
-// ─── Refactor swarm prompts ─────────────────────────────────────────────────
+// ─── Refactor prompts ────────────────────────────────────────────────────────
 
-/// Four-voice refactor swarm. Each voice scans the SAME file content
-/// from a different lens; the synthesizer picks the best proposal.
 pub(crate) const REFACTOR_VOICES: &[(&str, &str, &str)] = &[
     (
         "duplicate",
-        "🔁 Duplicate hunter",
-        "You are the DUPLICATE HUNTER. Scan the file content provided \
-         for code patterns that repeat 2+ times. For each: cite the \
-         duplicates by line number and propose how to factor them (a \
-         shared helper, a constant, a small abstraction). PROHIBITIONS: \
-         do not propose abstractions where the cost (extra indirection, \
-         coupling) clearly exceeds the savings. Two near-duplicates that \
-         would diverge naturally over time should stay duplicated. \
-         If you find no genuine duplicates, say so explicitly — \
-         'NO DUPLICATES IN THIS FILE.' is a valid finding. Stay under \
-         200 words.",
+        "✂️ Duplicate eliminator",
+        "You are the DUPLICATE ELIMINATOR. Scan for copied-and-pasted logic, \
+         parallel branches that only differ by a literal, or hand-rolled \
+         algorithms that the standard library already provides. PROHIBITIONS: \
+         do NOT flag boilerplate that language idioms demand. If the code is \
+         reasonable, say so. Stay under 200 words.",
     ),
     (
         "complexity",
-        "📏 Complexity hunter",
-        "You are the COMPLEXITY HUNTER. Scan for functions over 50 \
-         lines, nesting depth over 3, parameter lists over 5, or \
-         cyclomatic complexity that's hard to follow on first read. \
-         For each: propose a decomposition (extract function, early \
-         return, replace flag-arg with two methods). PROHIBITIONS: do \
-         not propose decompositions for functions that ARE genuinely \
-         doing one cohesive thing that just happens to be long (e.g. \
-         a switch over enum variants, a parser). 'Long' is not the \
-         same as 'should be split.' If everything in the file is \
+        "🧩 Complexity reducer",
+        "You are the COMPLEXITY REDUCER. Look for functions over 50 lines, \
+         nesting depth > 3, convoluted boolean conditions, or structs with \
+         too many responsibilities. Propose ONE high-leverage extraction or \
+         simplification. Cite file:line. PROHIBITIONS: do not propose \
+         premature generalizations or theoretical patterns. If the code is \
          reasonable, say so. Stay under 200 words.",
     ),
     (
@@ -107,30 +95,45 @@ pub(crate) const REFACTOR_SYNTHESIZER: &str =
      — if any voice flagged a serious concern about another's proposal, \
      respect it. Output, in this exact structure:\n\n\
      ## Title\n\
-     One short line — the inbox row label, e.g. 'Extract \
-     parse_options helper from main()'.\n\n\
+     One short line describing the change, e.g. 'Extract parse_options helper from main()'.\n\n\
      ## Why this matters\n\
-     One paragraph: what's wrong today, what the change improves, who \
-     benefits.\n\n\
+     One paragraph: what is deficient today, what the change improves, and why it is safe.\n\n\
      ## Risk\n\
-     One word: `low`, `medium`, or `high`. A behaviour-preserving \
-     extraction of a pure helper is `low`. A change that crosses a \
-     module boundary or touches I/O is `medium` at best. Anything \
-     touching concurrency, persistence, or error types is `high`.\n\n\
+     One word: `low`, `medium`, or `high`.\n\n\
      ## Diff\n\
-     A unified diff fenced as ```diff. Include `--- a/<path>` and \
-     `+++ b/<path>` headers plus `@@` hunks. The diff MUST apply \
-     cleanly to the current file content — do not invent surrounding \
-     lines, copy them verbatim from the input.\n\n\
+     A unified diff fenced as ```diff. Include `--- a/<path>` and `+++ b/<path>` headers plus `@@` hunks. \
+     The diff MUST apply cleanly to the current file content — copy surrounding context lines verbatim.\n\n\
      ## Verification\n\
-     The single command the user can run RIGHT NOW to confirm the \
-     change doesn't break anything (e.g. `cargo test --package kilroy`, \
-     `npm test -- src/components/X`, `pytest tests/test_x.py`).\n\n\
-     If NO voice surfaced anything worth shipping, output exactly:\n\
-     `## No proposal\n\nNothing high-confidence to suggest for this \
-     file right now.`\n\n\
-     Do not pad or hedge — picking nothing is a valid outcome and \
-     more honest than fabricating a low-value proposal.";
+     The single command to verify the change (e.g. `cargo test`, `npm test`, `pytest`).\n\n\
+     If nothing reaches the 'risk-free + high-value' bar, output exactly:\n\
+     ## No proposal\n\n\
+     Nothing high-confidence to suggest for this file right now.";
+
+pub(crate) const REFACTOR_SINGLE_PASS_SYSTEM: &str =
+    "You are Kilroy's Senior Code Refactoring Engine. You analyze source files to identify \
+     the single highest-impact, lowest-risk refactoring opportunity across four essential dimensions:\n\
+     1. Duplication — repeated code patterns worth factoring into shared helpers or constants\n\
+     2. Complexity — functions over 50 lines, deep nesting (>3), convoluted conditionals\n\
+     3. Error handling — unwrapped Results/Options, panics, swallowed errors, missing error propagation\n\
+     4. Modernization — outdated idioms, dead code, cleaner standard-library primitives\n\n\
+     PROHIBITIONS:\n\
+     - Do NOT propose cosmetic changes, speculative abstractions, or changes that risk behavioral drift.\n\
+     - If the file is already clean, well-structured, and has no high-confidence improvements, say so.\n\n\
+     Output in this exact structure:\n\n\
+     ## Title\n\
+     One short line describing the change, e.g. 'Extract parse_options helper from main()'.\n\n\
+     ## Why this matters\n\
+     One paragraph: what is deficient today, what the change improves, and why it is safe.\n\n\
+     ## Risk\n\
+     One word: `low`, `medium`, or `high`.\n\n\
+     ## Diff\n\
+     A unified diff fenced as ```diff. Include `--- a/<path>` and `+++ b/<path>` headers plus `@@` hunks. \
+     The diff MUST apply cleanly to the current file content — copy surrounding context lines verbatim.\n\n\
+     ## Verification\n\
+     The single command to verify the change (e.g. `cargo test`, `npm test`, `pytest`).\n\n\
+     If nothing reaches the 'risk-free + high-value' bar, output exactly:\n\
+     ## No proposal\n\n\
+     Nothing high-confidence to suggest for this file right now.";
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
@@ -171,6 +174,8 @@ pub struct AnalyzeFileInput {
     /// triggers from the UI.
     #[serde(default)]
     pub scan_run_id: Option<String>,
+    #[serde(default)]
+    pub strategy: Option<crate::settings::CouncilStrategy>,
 }
 
 // ─── Commands ───────────────────────────────────────────────────────────────
@@ -314,19 +319,67 @@ pub async fn refactor_analyze_file(
         raw,
     );
 
+    let resolved_strategy = payload
+        .strategy
+        .unwrap_or_else(|| state.settings.read().council_strategy);
+
     let chat = state.chat.clone();
-    let synthesized = swarm_with_context(
-        &app,
-        &chat,
-        REFACTOR_VOICES,
-        REFACTOR_SYNTHESIZER,
-        "🧭 Refactor recommendation",
-        "agent://refactor",
-        &shared_context,
-        "Propose ONE refactor for this file, or say there's nothing worth shipping.",
-        None,
-    )
-    .await;
+    let synthesized = match resolved_strategy {
+        crate::settings::CouncilStrategy::SinglePass => {
+            let msgs = vec![
+                crate::generation::ChatMessage::text("system", REFACTOR_SINGLE_PASS_SYSTEM),
+                crate::generation::ChatMessage::text(
+                    "user",
+                    format!(
+                        "{}\n\nPropose ONE refactor for this file, or output '## No proposal' if there is nothing worth shipping.",
+                        shared_context
+                    ),
+                ),
+            ];
+
+            let app_for_stream = app.clone();
+            let mut synthesized = String::new();
+            let res = chat
+                .chat_stream(
+                    &msgs,
+                    Some(crate::generation::ChatOptions {
+                        temperature: Some(0.2),
+                        num_predict: Some(1500),
+                        top_p: None,
+                        num_ctx: Some(16_384),
+                    }),
+                    |delta| {
+                        synthesized.push_str(delta);
+                        let _ = app_for_stream.emit(
+                            "agent://refactor/synthesis",
+                            serde_json::json!({
+                                "delta": delta,
+                            }),
+                        );
+                    },
+                )
+                .await;
+
+            if let Err(e) = res {
+                tracing::warn!("refactor analysis failed: {:#}", e);
+            }
+            synthesized
+        }
+        crate::settings::CouncilStrategy::Swarm => {
+            crate::commands::agent::swarm_with_context(
+                &app,
+                &chat,
+                REFACTOR_VOICES,
+                REFACTOR_SYNTHESIZER,
+                "🧭 Refactor recommendation",
+                "agent://refactor",
+                &shared_context,
+                "Propose ONE refactor for this file, or say there's nothing worth shipping.",
+                None,
+            )
+            .await
+        }
+    };
 
     // Parse the synthesized Markdown — pull out title, risk, diff. If
     // the synth said "no proposal" or the diff section is empty, store
@@ -476,7 +529,11 @@ pub async fn refactor_dismiss_proposal(state: State<'_, AppState>, id: i64) -> R
 /// action — 'applied' here just means "left the inbox", not "landed
 /// on disk."
 #[tauri::command]
-pub async fn refactor_apply_proposal(state: State<'_, AppState>, id: i64) -> Result<i64, String> {
+pub async fn refactor_apply_proposal(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<i64, String> {
     let memory_conn = state
         .memory
         .lock()
@@ -525,6 +582,18 @@ pub async fn refactor_apply_proposal(state: State<'_, AppState>, id: i64) -> Res
         params![id],
     )
     .map_err(|e| format!("{}", e))?;
+
+    let _ = app.emit(
+        "actuator://action_proposed",
+        serde_json::json!({
+            "run_id": "",
+            "task_id": 0,
+            "action_id": action_id,
+            "kind": "file_patch",
+            "target": Some(file_path),
+            "has_diff": true,
+        }),
+    );
 
     Ok(action_id)
 }

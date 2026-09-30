@@ -95,7 +95,7 @@ pub async fn plan_with_mode(
                 temperature: Some(0.2),
                 num_predict: Some(1024),
                 top_p: None,
-                num_ctx: Some(8192),
+                num_ctx: Some(16_384),
             }),
         )
         .await

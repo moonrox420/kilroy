@@ -150,8 +150,8 @@ pub struct ChatClient {
 impl ChatClient {
     pub fn new(settings: Arc<RwLock<Settings>>) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(300))
-            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(600))
+            .connect_timeout(Duration::from_secs(15))
             .build()
             .expect("reqwest client");
         Self { client, settings }

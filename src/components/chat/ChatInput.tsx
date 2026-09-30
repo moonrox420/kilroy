@@ -18,6 +18,7 @@
 import { useState, useRef, useEffect, type KeyboardEvent, type ClipboardEvent, type DragEvent } from "react";
 import { Send, Square, ImagePlus, X } from "lucide-react";
 import { useAgent } from "@/store/agent";
+import { useSettings } from "@/store/settings";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/store/notifications";
 import { useModifierKey } from "@/store/platform";
@@ -52,6 +53,11 @@ export function ChatInput() {
   const [dragOver, setDragOver] = useState(false);
   const send = useAgent((s) => s.send);
   const isThinking = useAgent((s) => s.isThinking);
+  const agentMode = useAgent((s) => s.mode);
+  const councilStrategyOverride = useAgent((s) => s.councilStrategyOverride);
+  const setCouncilStrategyOverride = useAgent((s) => s.setCouncilStrategyOverride);
+  const settingsStrategy = useSettings((s) => s.current?.council_strategy) ?? "single_pass";
+  const activeCouncilStrategy = councilStrategyOverride ?? settingsStrategy;
   const modKey = useModifierKey();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -186,6 +192,36 @@ export function ChatInput() {
         </div>
       )}
 
+      {agentMode === "council" && (
+        <div className="flex items-center justify-between px-1 pb-1 text-[11px] text-ink-subtle">
+          <span className="flex items-center gap-1.5 font-medium">
+            <span>🗣️ Council Deliberation</span>
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              setCouncilStrategyOverride(
+                activeCouncilStrategy === "single_pass" ? "swarm" : "single_pass"
+              )
+            }
+            className="flex items-center gap-1.5 rounded border border-line bg-bg-2 px-2 py-0.5 text-[10.5px] text-ink transition-colors hover:border-amber hover:text-amber"
+            title="Click to toggle between fast Single-Pass and 4-Voice Swarm for Council"
+          >
+            {activeCouncilStrategy === "single_pass" ? (
+              <>
+                <span className="text-amber">⚡ Single-Pass (Fast)</span>
+                <span className="text-ink-ghost">· switch to Swarm</span>
+              </>
+            ) : (
+              <>
+                <span className="text-amber">🗣️ 4-Voice Swarm</span>
+                <span className="text-ink-ghost">· switch to Single-Pass</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       <div
         onDrop={onDrop}
         onDragOver={onDragOver}
@@ -247,13 +283,13 @@ export function ChatInput() {
         />
         <Button
           size="icon"
-          variant={value.trim() || images.length > 0 ? "default" : "ghost"}
-          onClick={submit}
-          disabled={(!value.trim() && images.length === 0) || isThinking}
-          title="Send"
+          variant={isThinking ? "destructive" : value.trim() || images.length > 0 ? "default" : "ghost"}
+          onClick={isThinking ? () => useAgent.getState().cancelThinking() : submit}
+          disabled={!isThinking && !value.trim() && images.length === 0}
+          title={isThinking ? "Stop generating" : "Send"}
         >
           {isThinking ? (
-            <Square className="h-3.5 w-3.5" />
+            <Square className="h-3.5 w-3.5 fill-current" />
           ) : (
             <Send className="h-3.5 w-3.5" />
           )}
