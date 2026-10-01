@@ -20,7 +20,7 @@ use crate::runtime::events::{PlanReady, PlannedTask, RunStarted};
 use crate::runtime::planner;
 use crate::state::{AgentMode, AppState};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 // ─── Wire types ─────────────────────────────────────────────────────────────
 
@@ -727,20 +727,84 @@ pub(crate) async fn swarm_with_context(
     let synthesis_ch = format!("{}/synthesis", event_prefix);
     let done_ch = format!("{}/done", event_prefix);
 
-    let mut handles = Vec::new();
-    for (voice_id, _label, voice_prompt) in voices {
-        let chat = chat.clone();
-        let app = app.clone();
-        let msgs = build_council_voice_messages(
-            voice_prompt,
-            shared_context,
-            user_input,
-            user_images.clone(),
-        );
-        let voice_id = *voice_id;
-        let voice_ch = voice_ch.clone();
-        let voice_done_ch = voice_done_ch.clone();
-        let handle = tauri::async_runtime::spawn(async move {
+    let is_parallel = app
+        .try_state::<AppState>()
+        .map(|s| s.settings.read().is_swarm_parallel())
+        .unwrap_or(false);
+
+    let mut outputs: Vec<(&'static str, String)> = Vec::new();
+
+    if is_parallel {
+        let mut handles = Vec::new();
+        for (voice_id, _label, voice_prompt) in voices {
+            let chat = chat.clone();
+            let app = app.clone();
+            let msgs = build_council_voice_messages(
+                voice_prompt,
+                shared_context,
+                user_input,
+                user_images.clone(),
+            );
+            let voice_id = *voice_id;
+            let voice_ch = voice_ch.clone();
+            let voice_done_ch = voice_done_ch.clone();
+            let handle = tauri::async_runtime::spawn(async move {
+                let mut buf = String::new();
+                let res = chat
+                    .chat_stream(
+                        &msgs,
+                        Some(ChatOptions {
+                            temperature: Some(0.6),
+                            num_predict: Some(600),
+                            top_p: None,
+                            num_ctx: Some(8192),
+                        }),
+                        |delta| {
+                            buf.push_str(delta);
+                            let _ = app.emit(
+                                &voice_ch,
+                                CouncilVoiceChunk {
+                                    voice: voice_id,
+                                    delta: delta.to_string(),
+                                },
+                            );
+                        },
+                    )
+                    .await;
+                if let Err(e) = &res {
+                    tracing::warn!(voice = voice_id, "swarm voice failed: {:#}", e);
+                    buf.push_str(&format!("\n\n_({} voice failed: {})_", voice_id, e));
+                }
+                let _ = app.emit(
+                    &voice_done_ch,
+                    CouncilVoiceDone {
+                        voice: voice_id,
+                        content: buf.clone(),
+                    },
+                );
+                (voice_id, buf)
+            });
+            handles.push(handle);
+        }
+
+        for h in handles {
+            match h.await {
+                Ok(pair) => outputs.push(pair),
+                Err(e) => {
+                    tracing::warn!("swarm join error: {:#}", e);
+                }
+            }
+        }
+    } else {
+        // Sequential voice execution for Entry tier VRAM (<=8GB) to prevent memory thrashing
+        for (voice_id, _label, voice_prompt) in voices {
+            let msgs = build_council_voice_messages(
+                voice_prompt,
+                shared_context,
+                user_input,
+                user_images.clone(),
+            );
+            let voice_id = *voice_id;
             let mut buf = String::new();
             let res = chat
                 .chat_stream(
@@ -774,18 +838,7 @@ pub(crate) async fn swarm_with_context(
                     content: buf.clone(),
                 },
             );
-            (voice_id, buf)
-        });
-        handles.push(handle);
-    }
-
-    let mut outputs: Vec<(&'static str, String)> = Vec::new();
-    for h in handles {
-        match h.await {
-            Ok(pair) => outputs.push(pair),
-            Err(e) => {
-                tracing::warn!("swarm join error: {:#}", e);
-            }
+            outputs.push((voice_id, buf));
         }
     }
 

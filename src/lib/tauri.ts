@@ -357,6 +357,8 @@ export const activity = {
 export type SandboxDefault = "host" | "windows_sandbox" | "docker";
 export type CouncilStrategy = "single_pass" | "swarm";
 
+export type SwarmConcurrency = "auto" | "sequential" | "parallel";
+
 export interface SettingsView {
   ollama_url: string;
   chat_model: string;
@@ -369,6 +371,7 @@ export interface SettingsView {
   chunk_stride: number;
   embedding_dim: number;
   council_strategy: CouncilStrategy;
+  swarm_concurrency?: SwarmConcurrency;
   custom_compiler_command: string | null;
   /** True until the first-run wizard completes. Drives the onboarding
    *  modal. Flipped to false by the wizard's Finish button. */
@@ -386,6 +389,7 @@ export interface SettingsPatch {
   chunk_window?: number;
   chunk_stride?: number;
   council_strategy?: CouncilStrategy;
+  swarm_concurrency?: SwarmConcurrency;
   custom_compiler_command?: string | null;
   first_run?: boolean;
 }
@@ -863,6 +867,7 @@ export const app = {
 // ─── platform (OS smart detector) ─────────────────────────────────────────────
 
 export type OsId = "windows" | "macos" | "linux" | "other";
+export type HardwareTier = "entry" | "balanced" | "workstation";
 
 export interface PlatformInfo {
   os: OsId;
@@ -878,6 +883,8 @@ export interface PlatformInfo {
   /** "Cmd" on macOS, otherwise "Ctrl" — for keyboard-hint text. */
   modifier_key: string;
   path_sep: string;
+  vram_mb?: number | null;
+  hardware_tier: HardwareTier;
 }
 
 export const platform = {

@@ -123,7 +123,7 @@ struct EditorPreviewEvent {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
-enum AgentDecision {
+pub(crate) enum AgentDecision {
     Inspect {
         rationale: String,
         tools: Vec<ToolCall>,
@@ -208,30 +208,72 @@ pub async fn run_code(
             "Evaluating evidence",
         );
 
-        let decision = state
-            .chat
-            .generate_json_with_images::<AgentDecision>(
-                system_prompt(),
-                &decision_prompt(&request.message, &evidence, ordinal),
-                if ordinal == 1 {
+        let decision_prompt_text = decision_prompt(&request.message, &evidence, ordinal);
+        let messages = vec![
+            crate::generation::ChatMessage::text("system", system_prompt()),
+            crate::generation::ChatMessage {
+                role: "user".to_string(),
+                content: decision_prompt_text,
+                images: if ordinal == 1 {
                     request.images.clone()
                 } else {
                     None
                 },
+            },
+        ];
+
+        let mut streamed_text = String::new();
+        let app_handle = app.clone();
+        let run_id_str = request.run_id.clone();
+
+        let stream_res = state
+            .chat
+            .chat_stream(
+                &messages,
                 Some(ChatOptions {
                     temperature: Some(0.1),
                     num_predict: Some(3072),
                     top_p: None,
                     num_ctx: Some(16_384),
                 }),
+                |chunk| {
+                    streamed_text.push_str(chunk);
+                    emit_thought(&app_handle, &run_id_str, ordinal, chunk);
+                },
             )
             .await;
         model_calls += 1;
 
-        let decision = match decision {
+        if let Err(error) = stream_res {
+            let message = format!("streaming model decision failed: {error:#}");
+            let conn = memory.lock();
+            agent_runtime::finish_step(
+                &conn,
+                step_id,
+                "failed",
+                None,
+                Some(&message),
+                1,
+                step_started.elapsed().as_millis() as i64,
+            )?;
+            agent_runtime::finish_run(
+                &conn,
+                &request.run_id,
+                "failed",
+                "blocked",
+                None,
+                Some(&message),
+                model_calls,
+                0,
+                0,
+            )?;
+            return Err(anyhow!(message));
+        }
+
+        let decision = match parse_agent_decision(&streamed_text) {
             Ok(decision) => decision,
             Err(error) => {
-                let message = format!("structured model decision failed: {error:#}");
+                let message = format!("parse model decision failed: {error:#}");
                 let conn = memory.lock();
                 agent_runtime::finish_step(
                     &conn,
@@ -650,22 +692,123 @@ pub(crate) fn emit_progress(app: &AppHandle, run_id: &str, step: usize, kind: &s
     );
 }
 
+pub(crate) fn emit_thought(app: &AppHandle, run_id: &str, step: usize, chunk: &str) {
+    #[derive(Serialize, Clone)]
+    struct ThoughtChunk<'a> {
+        run_id: &'a str,
+        step: usize,
+        chunk: &'a str,
+    }
+    let _ = app.emit(
+        "agent://run/thought_chunk",
+        ThoughtChunk {
+            run_id,
+            step,
+            chunk,
+        },
+    );
+    let _ = app.emit(
+        "agent://runtime/event",
+        AgentEvent {
+            run_id: run_id.to_string(),
+            step,
+            kind: "thought".to_string(),
+            message: chunk.to_string(),
+        },
+    );
+}
+
+pub(crate) fn parse_agent_decision(raw: &str) -> Result<AgentDecision> {
+    let trimmed = raw.trim();
+
+    // 1. Direct JSON parse
+    if let Ok(decision) = serde_json::from_str::<AgentDecision>(trimmed) {
+        return Ok(decision);
+    }
+
+    // 2. Extract from markdown code fences (```json ... ``` or ``` ... ```)
+    if let Some(start_fence) = trimmed.find("```") {
+        let after_fence = &trimmed[start_fence + 3..];
+        let content_start = if after_fence.starts_with("json") {
+            4
+        } else {
+            0
+        };
+        let inner = &after_fence[content_start..];
+        if let Some(end_fence) = inner.find("```") {
+            let candidate = inner[..end_fence].trim();
+            if let Ok(decision) = serde_json::from_str::<AgentDecision>(candidate) {
+                return Ok(decision);
+            }
+        }
+    }
+
+    // 3. Fallback: Search for outer JSON braces containing "decision"
+    if let Some(decision_idx) = trimmed.find("\"decision\"") {
+        if let Some(start_brace) = trimmed[..decision_idx].rfind('{') {
+            // Find balanced closing brace
+            let mut depth = 0;
+            let mut in_str = false;
+            let mut escape = false;
+            let mut end_brace = None;
+
+            for (idx, ch) in trimmed[start_brace..].char_indices() {
+                if escape {
+                    escape = false;
+                    continue;
+                }
+                if ch == '\\' && in_str {
+                    escape = true;
+                    continue;
+                }
+                if ch == '"' {
+                    in_str = !in_str;
+                    continue;
+                }
+                if !in_str {
+                    if ch == '{' {
+                        depth += 1;
+                    } else if ch == '}' {
+                        depth -= 1;
+                        if depth == 0 {
+                            end_brace = Some(start_brace + idx);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if let Some(end) = end_brace {
+                let candidate = &trimmed[start_brace..=end];
+                if let Ok(decision) = serde_json::from_str::<AgentDecision>(candidate) {
+                    return Ok(decision);
+                }
+            }
+        }
+    }
+
+    // 4. Fallback: simple first '{' to last '}'
+    if let (Some(first), Some(last)) = (trimmed.find('{'), trimmed.rfind('}')) {
+        if first < last {
+            let candidate = &trimmed[first..=last];
+            if let Ok(decision) = serde_json::from_str::<AgentDecision>(candidate) {
+                return Ok(decision);
+            }
+        }
+    }
+
+    let excerpt: String = trimmed.chars().take(300).collect();
+    Err(anyhow!(
+        "could not parse agent decision JSON from model output: {excerpt}"
+    ))
+}
+
 fn initial_context(context: &BuiltAgentContext) -> String {
     let mut output = String::from("PROJECT OVERVIEW\n");
     output.push_str(&context.overview_for_prompt);
-    output.push_str("\n\nKNOWN PROJECT FILES\n");
-    output.push_str(
-        &context
-            .project_files
-            .iter()
-            .take(250)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n"),
-    );
     if !context.ctx.chunks.is_empty() {
         output.push_str("\n\nRETRIEVED CODE CONTEXT\n");
-        for chunk in context.ctx.chunks.iter().take(8) {
+        for chunk in context.ctx.chunks.iter().take(6) {
             output.push_str(&format!(
                 "\n{}\n",
                 serde_json::to_string(chunk).unwrap_or_default()
@@ -687,10 +830,11 @@ fn system_prompt() -> &'static str {
 Return strict JSON matching exactly one of these shapes:
 {"decision":"inspect","rationale":"why","tools":[{"tool":"read_file","path":"relative/path","start_line":1,"end_line":200}]}
 {"decision":"inspect","rationale":"why","tools":[{"tool":"search_files","query":"literal text","path":"optional/relative/dir"}]}
+{"decision":"inspect","rationale":"why","tools":[{"tool":"list_directory","path":"optional/relative/dir","max_depth":2}]}
 {"decision":"propose","summary":"what the approval-gated changes do","actions":[{"kind":"file_write","path":"relative/path","content":"complete contents","language":"rs"},{"kind":"file_patch","path":"relative/path","unified_diff":"complete unified diff"},{"kind":"shell","command":"command","sandbox":"windows_sandbox"}]}
 {"decision":"finish","summary":"answer supported by evidence","verification_status":"partially_verified"}
 {"decision":"blocked","reason":"specific missing information"}
-Never claim a write, command, build, or test happened unless corresponding tool evidence says it did. Read/search tools are automatic. All file and shell actions require user approval. Prefer unified diffs for existing files. Produce complete, applicable content with no placeholders or TODOs."#
+Never claim a write, command, build, or test happened unless corresponding tool evidence says it did. Read, search, and list tools are automatic. All file and shell actions require user approval. Prefer unified diffs for existing files. Produce complete, applicable content with no placeholders or TODOs."#
 }
 
 fn tool_evidence(call: &ToolCall, result: &ToolResult) -> String {
@@ -723,4 +867,46 @@ fn bounded(value: &str, max_chars: usize) -> String {
         .rev()
         .collect();
     format!("[older evidence truncated]\n{tail}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_direct_json_decision() {
+        let json = r#"{"decision":"inspect","rationale":"check source","tools":[{"tool":"read_file","path":"src/main.rs","start_line":1,"end_line":50}]}"#;
+        let parsed = parse_agent_decision(json).expect("parses direct json");
+        match parsed {
+            AgentDecision::Inspect { rationale, tools } => {
+                assert_eq!(rationale, "check source");
+                assert_eq!(tools.len(), 1);
+            }
+            _ => panic!("unexpected decision variant"),
+        }
+    }
+
+    #[test]
+    fn parses_markdown_fenced_decision() {
+        let json = "```json\n{\"decision\":\"finish\",\"summary\":\"done\",\"verification_status\":\"verified\"}\n```";
+        let parsed = parse_agent_decision(json).expect("parses fenced json");
+        match parsed {
+            AgentDecision::Finish { summary, .. } => {
+                assert_eq!(summary, "done");
+            }
+            _ => panic!("unexpected decision variant"),
+        }
+    }
+
+    #[test]
+    fn parses_decision_with_preceding_think_tags() {
+        let text = "<think>I should check the files first before proposing changes.</think>\n{\"decision\":\"blocked\",\"reason\":\"need more context\"}";
+        let parsed = parse_agent_decision(text).expect("parses json with think tags");
+        match parsed {
+            AgentDecision::Blocked { reason } => {
+                assert_eq!(reason, "need more context");
+            }
+            _ => panic!("unexpected decision variant"),
+        }
+    }
 }

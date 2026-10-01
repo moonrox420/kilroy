@@ -52,6 +52,48 @@ impl Os {
     }
 }
 
+/// The detected GPU hardware tier based on VRAM capacity.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HardwareTier {
+    Entry,       // <= 8GB VRAM (e.g. RTX 5070 Laptop, RTX 4060)
+    Balanced,    // 12-16GB VRAM (e.g. RTX 4070 Ti, RTX 4080)
+    Workstation, // >= 24GB VRAM (e.g. RTX 3090/4090, A6000, Apple Max)
+}
+
+/// Detect total VRAM in MB via nvidia-smi.
+pub fn detect_vram_mb() -> Option<u64> {
+    let output = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
+        .output();
+    if let Ok(out) = output {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            for line in s.lines() {
+                if let Ok(mb) = line.trim().parse::<u64>() {
+                    return Some(mb);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Compute hardware tier from detected VRAM. Defaults to Entry tier.
+pub fn detect_hardware_tier() -> HardwareTier {
+    if let Some(vram_mb) = detect_vram_mb() {
+        if vram_mb <= 9_000 {
+            HardwareTier::Entry
+        } else if vram_mb <= 18_000 {
+            HardwareTier::Balanced
+        } else {
+            HardwareTier::Workstation
+        }
+    } else {
+        HardwareTier::Entry
+    }
+}
+
 /// Everything the frontend needs to render an OS-appropriate UI without
 /// hardcoding platform assumptions in TypeScript.
 #[derive(Serialize, Clone, Debug)]
@@ -77,6 +119,8 @@ pub struct PlatformInfo {
     pub modifier_key: String,
     /// Native path separator.
     pub path_sep: String,
+    pub vram_mb: Option<u64>,
+    pub hardware_tier: HardwareTier,
 }
 
 /// Build the platform snapshot. Pure and cheap; safe to call on every
@@ -108,6 +152,9 @@ pub fn info() -> PlatformInfo {
     }
     .to_string();
 
+    let vram_mb = detect_vram_mb();
+    let hardware_tier = detect_hardware_tier();
+
     PlatformInfo {
         os,
         arch: std::env::consts::ARCH.to_string(),
@@ -120,6 +167,8 @@ pub fn info() -> PlatformInfo {
         shell_kind: if is_windows { "windows" } else { "unix" }.to_string(),
         modifier_key: if is_macos { "Cmd" } else { "Ctrl" }.to_string(),
         path_sep: if is_windows { "\\" } else { "/" }.to_string(),
+        vram_mb,
+        hardware_tier,
     }
 }
 
@@ -165,5 +214,22 @@ mod tests {
         );
         // The default must be one of the available kinds.
         assert!(p.available_sandboxes.contains(&p.default_sandbox));
+    }
+
+    #[test]
+    fn hardware_tier_classification() {
+        let tier = detect_hardware_tier();
+        let expected = if let Some(mb) = detect_vram_mb() {
+            if mb <= 9_000 {
+                HardwareTier::Entry
+            } else if mb <= 18_000 {
+                HardwareTier::Balanced
+            } else {
+                HardwareTier::Workstation
+            }
+        } else {
+            HardwareTier::Entry
+        };
+        assert_eq!(tier, expected);
     }
 }

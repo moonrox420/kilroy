@@ -26,6 +26,12 @@ pub enum ToolCall {
         #[serde(default)]
         path: Option<String>,
     },
+    ListDirectory {
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        max_depth: Option<usize>,
+    },
 }
 
 impl ToolCall {
@@ -33,6 +39,7 @@ impl ToolCall {
         match self {
             Self::ReadFile { .. } => "read_file",
             Self::SearchFiles { .. } => "search_files",
+            Self::ListDirectory { .. } => "list_directory",
         }
     }
 
@@ -40,6 +47,7 @@ impl ToolCall {
         match self {
             Self::ReadFile { path, .. } => Some(path),
             Self::SearchFiles { .. } => None,
+            Self::ListDirectory { .. } => None,
         }
     }
 }
@@ -62,6 +70,9 @@ pub fn execute(root: &Path, call: &ToolCall) -> ToolResult {
             end_line,
         } => read_file(root, path, *start_line, *end_line),
         ToolCall::SearchFiles { query, path } => search_files(root, query, path.as_deref()),
+        ToolCall::ListDirectory { path, max_depth } => {
+            list_directory(root, path.as_deref(), *max_depth)
+        }
     };
     let duration_ms = started.elapsed().as_millis() as u64;
     match result {
@@ -243,6 +254,103 @@ fn is_text_candidate(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn list_directory(root: &Path, rel_path: Option<&str>, max_depth: Option<usize>) -> Result<String> {
+    let target_dir = match rel_path {
+        Some(p) if !p.trim().is_empty() && p.trim() != "." => {
+            if actuator::is_protected_path(p) {
+                return Err(anyhow!("protected internal path: {p}"));
+            }
+            actuator::resolve_safe(root, p)?
+        }
+        _ => root.to_path_buf(),
+    };
+
+    let meta =
+        fs::metadata(&target_dir).with_context(|| format!("stat {}", target_dir.display()))?;
+    if !meta.is_dir() {
+        return Err(anyhow!("not a directory: {}", target_dir.display()));
+    }
+
+    let depth_limit = max_depth.unwrap_or(2).clamp(1, 4);
+    let mut lines = Vec::new();
+    let display_prefix = rel_path.unwrap_or(".");
+    lines.push(format!(
+        "DIRECTORY: {display_prefix} (max depth: {depth_limit})"
+    ));
+
+    fn visit(
+        dir: &Path,
+        current_depth: usize,
+        max_depth: usize,
+        lines: &mut Vec<String>,
+    ) -> Result<()> {
+        if lines.len() >= 120 {
+            return Ok(());
+        }
+        let read_dir = match fs::read_dir(dir) {
+            Ok(rd) => rd,
+            Err(err) => {
+                lines.push(format!("  [error reading directory: {err}]"));
+                return Ok(());
+            }
+        };
+
+        let mut entries = Vec::new();
+        for entry in read_dir.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if is_ignored_dir(&path) {
+                continue;
+            }
+            entries.push(entry);
+        }
+        entries.sort_by_key(|e| {
+            (
+                e.file_type().map(|ft| !ft.is_dir()).unwrap_or(true),
+                e.file_name(),
+            )
+        });
+
+        for entry in entries {
+            if lines.len() >= 120 {
+                lines.push("  ... [truncated, list specific subdirectories for more]".to_string());
+                return Ok(());
+            }
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let ft = entry.file_type()?;
+            let indent = "  ".repeat(current_depth);
+            if ft.is_dir() {
+                lines.push(format!("{indent}📁 {file_name}/"));
+                if current_depth < max_depth {
+                    visit(&entry.path(), current_depth + 1, max_depth, lines)?;
+                }
+            } else {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let size_str = format_bytes(size);
+                lines.push(format!("{indent}📄 {file_name} ({size_str})"));
+            }
+        }
+        Ok(())
+    }
+
+    visit(&target_dir, 1, depth_limit, &mut lines)?;
+
+    if lines.len() == 1 {
+        lines.push("  (empty directory or all contents ignored)".to_string());
+    }
+
+    Ok(lines.join("\n"))
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,6 +406,26 @@ mod tests {
             },
         );
         assert!(!result.success);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn list_directory_returns_structure_and_ignores_noise() {
+        let root = temp_root();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(root.join(".git/config"), "ignored").unwrap();
+        fs::write(root.join("README.md"), "# Hello").unwrap();
+        let result = execute(
+            &root,
+            &ToolCall::ListDirectory {
+                path: None,
+                max_depth: Some(2),
+            },
+        );
+        assert!(result.success);
+        assert!(result.output.contains("📁 src/"));
+        assert!(result.output.contains("📄 README.md"));
+        assert!(!result.output.contains(".git"));
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -25,6 +25,15 @@ pub enum CouncilStrategy {
     Swarm,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SwarmConcurrency {
+    #[default]
+    Auto,
+    Sequential,
+    Parallel,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -41,6 +50,7 @@ pub struct Settings {
     /// vec0 table dimension stay aligned.
     pub embedding_dim: usize,
     pub council_strategy: CouncilStrategy,
+    pub swarm_concurrency: SwarmConcurrency,
     pub custom_compiler_command: Option<String>,
     /// True until the first-run setup wizard completes. Drives the
     /// onboarding modal that walks the user through Ollama detection,
@@ -48,6 +58,18 @@ pub struct Settings {
     /// when the user clicks Finish.
     #[serde(default = "default_true")]
     pub first_run: bool,
+}
+
+impl Settings {
+    pub fn is_swarm_parallel(&self) -> bool {
+        match self.swarm_concurrency {
+            SwarmConcurrency::Auto => {
+                crate::platform::detect_hardware_tier() != crate::platform::HardwareTier::Entry
+            }
+            SwarmConcurrency::Parallel => true,
+            SwarmConcurrency::Sequential => false,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -82,6 +104,7 @@ impl Default for Settings {
             chunk_stride: 22,
             embedding_dim: 768,
             council_strategy: CouncilStrategy::SinglePass,
+            swarm_concurrency: SwarmConcurrency::Auto,
             custom_compiler_command: None,
             first_run: true,
         }
@@ -194,6 +217,7 @@ pub struct SettingsUpdate {
     pub chunk_window: Option<usize>,
     pub chunk_stride: Option<usize>,
     pub council_strategy: Option<CouncilStrategy>,
+    pub swarm_concurrency: Option<SwarmConcurrency>,
     pub custom_compiler_command: Option<String>,
     pub first_run: Option<bool>,
 }
@@ -229,6 +253,9 @@ impl SettingsUpdate {
         }
         if let Some(v) = self.council_strategy {
             s.council_strategy = v;
+        }
+        if let Some(v) = self.swarm_concurrency {
+            s.swarm_concurrency = v;
         }
         if let Some(v) = self.custom_compiler_command {
             let trimmed = v.trim().to_string();
@@ -270,5 +297,15 @@ mod tests {
         settings.chunk_stride = 22;
         settings.ollama_url = "http://user:secret@localhost:11434".into();
         assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn swarm_concurrency_defaults_and_toggles() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.swarm_concurrency, SwarmConcurrency::Auto);
+        settings.swarm_concurrency = SwarmConcurrency::Sequential;
+        assert!(!settings.is_swarm_parallel());
+        settings.swarm_concurrency = SwarmConcurrency::Parallel;
+        assert!(settings.is_swarm_parallel());
     }
 }
